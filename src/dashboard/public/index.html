@@ -17,28 +17,86 @@
     <a href="/logout" class="ghost-link">Log out</a>
   </header>
 
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="settings">Paramètres</button>
+    <button class="tab-btn" data-tab="categories">Catégories</button>
+    <button class="tab-btn" data-tab="texts">Textes</button>
+    <button class="tab-btn" data-tab="reviews">Avis &amp; Transcripts</button>
+  </nav>
+
   <main class="wrap">
-    <section class="panel" id="settingsPanel">
-      <h2>Settings</h2>
-      <div class="hairline"></div>
-      <label class="field">
-        <span>Support team name</span>
-        <span class="hint">Shown to users when staff reply, and on ticket embeds.</span>
-        <input id="teamName" type="text" placeholder="Signature Support" />
-      </label>
-      <button id="saveSettings" class="primary">Save settings</button>
-      <span class="save-ok" id="settingsSaved" hidden>Saved.</span>
+
+    <section class="tab-panel" data-tab-panel="settings">
+      <div class="panel">
+        <h2>Général</h2>
+        <div class="hairline"></div>
+        <label class="field">
+          <span>Nom de l'équipe support</span>
+          <span class="hint">Affiché à l'utilisateur quand le staff répond, et sur les embeds de ticket.</span>
+          <input id="teamName" type="text" placeholder="Signature Support" />
+        </label>
+        <button id="saveSettings" class="primary">Enregistrer</button>
+        <span class="save-ok" id="settingsSaved" hidden>Enregistré.</span>
+      </div>
+
+      <div class="panel">
+        <h2>Fermeture automatique</h2>
+        <div class="hairline"></div>
+        <p class="hint">Si le staff a déjà répondu au moins une fois, et que le ticket est inactif pendant la durée ci-dessous, l'utilisateur reçoit un avertissement en MP. S'il ne répond toujours pas après le délai de grâce, le ticket est fermé automatiquement.</p>
+        <label class="field inline">
+          <input id="autoCloseEnabled" type="checkbox" />
+          <span>Activer la fermeture automatique</span>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Inactivité avant avertissement (heures)</span>
+            <input id="inactivityHours" type="number" min="1" max="720" />
+          </label>
+          <label class="field">
+            <span>Délai de grâce après avertissement (minutes)</span>
+            <input id="graceMinutes" type="number" min="5" max="1440" />
+          </label>
+        </div>
+      </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Categories</h2>
-        <button id="addCategoryBtn" class="primary">+ New category</button>
+    <section class="tab-panel" data-tab-panel="categories" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Catégories</h2>
+          <button id="addCategoryBtn" class="primary">+ Nouvelle catégorie</button>
+        </div>
+        <p class="hint">Chaque catégorie est une option de support proposée à l'utilisateur. Assignez des rôles pour que seul le bon staff voie ces tickets. Les questions sont posées dans l'ordre ci-dessous ; une question peut être conditionnée à la réponse d'une question à choix précédente (ex : "Service custom" → "Quel service ?" → questions différentes selon la réponse).</p>
+        <div class="hairline"></div>
+        <div id="categoryList" class="category-list"></div>
       </div>
-      <p class="hint">Each category is a support option shown to users (e.g. Technical Support, Question, Custom Services). Assign roles so only the right staff see those tickets, and add up to 5 questions asked before the ticket is created.</p>
-      <div class="hairline"></div>
-      <div id="categoryList" class="category-list"></div>
     </section>
+
+    <section class="tab-panel" data-tab-panel="texts" hidden>
+      <div class="panel">
+        <h2>Textes du bot</h2>
+        <p class="hint">Tous les messages envoyés par le bot pendant le parcours d'un ticket. Le message de bienvenue est affiché avant le choix de langue (donc en un seul texte, généralement bilingue).</p>
+        <div class="hairline"></div>
+        <div id="textsList" class="texts-list"></div>
+        <button id="saveTexts" class="primary">Enregistrer les textes</button>
+        <span class="save-ok" id="textsSaved" hidden>Enregistré.</span>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="reviews" hidden>
+      <div class="panel">
+        <h2>Avis</h2>
+        <div class="hairline"></div>
+        <div class="stats-row" id="statsRow"></div>
+      </div>
+      <div class="panel">
+        <h2>Transcripts</h2>
+        <p class="hint">Historique des tickets fermés, avec la conversation complète.</p>
+        <div class="hairline"></div>
+        <div id="archiveList" class="archive-list"></div>
+      </div>
+    </section>
+
   </main>
 
   <template id="categoryTemplate">
@@ -51,34 +109,58 @@
       </div>
 
       <div class="field">
-        <span>Roles that can see these tickets</span>
+        <span>Rôles qui peuvent voir ces tickets</span>
         <div class="roles-picker"></div>
       </div>
 
       <div class="field">
-        <span>Questions asked before the ticket is created (max 5)</span>
+        <span>Questions posées avant la création du ticket</span>
         <div class="questions-list"></div>
-        <button class="ghost add-question-btn">+ Add question</button>
+        <button class="ghost add-question-btn">+ Ajouter une question</button>
       </div>
 
       <div class="category-card-actions">
-        <button class="primary save-category-btn">Save changes</button>
-        <button class="danger delete-category-btn">Delete category</button>
-        <span class="save-ok" hidden>Saved.</span>
+        <button class="primary save-category-btn">Enregistrer</button>
+        <button class="danger delete-category-btn">Supprimer</button>
+        <span class="save-ok" hidden>Enregistré.</span>
       </div>
     </article>
   </template>
 
   <template id="questionTemplate">
-    <div class="question-row">
-      <input class="q-label-en" placeholder="Question (English)" />
-      <input class="q-label-fr" placeholder="Question (Français)" />
-      <select class="q-style">
-        <option value="paragraph">Long answer</option>
-        <option value="short">Short answer</option>
-      </select>
-      <label class="q-required"><input type="checkbox" checked /> Required</label>
-      <button class="icon-btn remove-question-btn" title="Remove question">✕</button>
+    <div class="question-card">
+      <div class="question-card-row1">
+        <select class="q-type">
+          <option value="text">Réponse texte</option>
+          <option value="choice">Choix multiple</option>
+        </select>
+        <input class="q-label-en" placeholder="Question (English)" />
+        <input class="q-label-fr" placeholder="Question (Français)" />
+        <button class="icon-btn remove-question-btn" title="Supprimer">✕</button>
+      </div>
+      <div class="question-card-row2 text-only">
+        <select class="q-style">
+          <option value="paragraph">Réponse longue</option>
+          <option value="short">Réponse courte</option>
+        </select>
+        <label class="q-required"><input type="checkbox" checked /> Obligatoire</label>
+      </div>
+      <div class="options-editor choice-only" hidden>
+        <div class="options-list"></div>
+        <button class="ghost add-option-btn">+ Ajouter une option</button>
+      </div>
+      <div class="showif-row">
+        <span>Afficher seulement si</span>
+        <select class="q-showif"><option value="">Toujours</option></select>
+      </div>
+    </div>
+  </template>
+
+  <template id="optionTemplate">
+    <div class="option-row">
+      <input class="o-label-en" placeholder="Option (English)" />
+      <input class="o-label-fr" placeholder="Option (Français)" />
+      <button class="icon-btn remove-option-btn" title="Supprimer">✕</button>
     </div>
   </template>
 

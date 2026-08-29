@@ -34,7 +34,30 @@ function getTicketByChannel(channelId) {
 
 function createTicket(userId, ticket) {
   const all = readAll();
-  all[userId] = ticket;
+  all[userId] = {
+    transcript: [],
+    lastActivityAt: Date.now(),
+    staffReplied: false,
+    warningSentAt: null,
+    archiveId: null,
+    ...ticket,
+  };
+  writeAll(all);
+}
+
+function updateTicket(userId, patch) {
+  const all = readAll();
+  if (!all[userId]) return null;
+  all[userId] = { ...all[userId], ...patch };
+  writeAll(all);
+  return all[userId];
+}
+
+function appendTranscript(userId, entry) {
+  const all = readAll();
+  if (!all[userId]) return;
+  all[userId].transcript = all[userId].transcript || [];
+  all[userId].transcript.push({ at: Date.now(), ...entry });
   writeAll(all);
 }
 
@@ -48,6 +71,8 @@ module.exports = {
   getTicketByUser,
   getTicketByChannel,
   createTicket,
+  updateTicket,
+  appendTranscript,
   deleteTicketByUser,
   readAll,
 };
