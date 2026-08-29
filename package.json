@@ -1,0 +1,20 @@
+{
+  "name": "signature-modmail-bot",
+  "version": "1.0.0",
+  "description": "Custom modmail bot for the Signature Discord server",
+  "main": "src/index.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy-commands": "node src/deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0"
+  }
+}

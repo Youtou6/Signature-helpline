@@ -1,0 +1,57 @@
+{
+  "settings": {
+    "teamName": "Signature Support",
+    "modmailCategoryId": "",
+    "logChannelId": ""
+  },
+  "categories": [
+    {
+      "id": "technical",
+      "emoji": "🛠️",
+      "label_en": "Technical Support",
+      "label_fr": "Support technique",
+      "roleIds": [],
+      "questions": [
+        {
+          "id": "reason",
+          "label_en": "What is the technical issue you need help with?",
+          "label_fr": "Quel est le problème technique pour lequel vous avez besoin d'aide ?",
+          "style": "paragraph",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "question",
+      "emoji": "❓",
+      "label_en": "Question",
+      "label_fr": "Question",
+      "roleIds": [],
+      "questions": [
+        {
+          "id": "reason",
+          "label_en": "What is your question?",
+          "label_fr": "Quelle est votre question ?",
+          "style": "paragraph",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "other",
+      "emoji": "📁",
+      "label_en": "Other",
+      "label_fr": "Autre",
+      "roleIds": [],
+      "questions": [
+        {
+          "id": "reason",
+          "label_en": "Please describe the reason for your ticket.",
+          "label_fr": "Merci de décrire la raison de votre ticket.",
+          "style": "paragraph",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

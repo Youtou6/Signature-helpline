@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signature — Modmail Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/assets/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Modmail control</p>
+      <h1 class="wordmark small">SIGNATURE</h1>
+    </div>
+    <a href="/logout" class="ghost-link">Log out</a>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" id="settingsPanel">
+      <h2>Settings</h2>
+      <div class="hairline"></div>
+      <label class="field">
+        <span>Support team name</span>
+        <span class="hint">Shown to users when staff reply, and on ticket embeds.</span>
+        <input id="teamName" type="text" placeholder="Signature Support" />
+      </label>
+      <button id="saveSettings" class="primary">Save settings</button>
+      <span class="save-ok" id="settingsSaved" hidden>Saved.</span>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Categories</h2>
+        <button id="addCategoryBtn" class="primary">+ New category</button>
+      </div>
+      <p class="hint">Each category is a support option shown to users (e.g. Technical Support, Question, Custom Services). Assign roles so only the right staff see those tickets, and add up to 5 questions asked before the ticket is created.</p>
+      <div class="hairline"></div>
+      <div id="categoryList" class="category-list"></div>
+    </section>
+  </main>
+
+  <template id="categoryTemplate">
+    <article class="category-card">
+      <div class="category-card-head">
+        <input class="emoji-input" maxlength="4" />
+        <input class="label-en-input" placeholder="Label (English)" />
+        <input class="label-fr-input" placeholder="Label (Français)" />
+        <span class="id-badge"></span>
+      </div>
+
+      <div class="field">
+        <span>Roles that can see these tickets</span>
+        <div class="roles-picker"></div>
+      </div>
+
+      <div class="field">
+        <span>Questions asked before the ticket is created (max 5)</span>
+        <div class="questions-list"></div>
+        <button class="ghost add-question-btn">+ Add question</button>
+      </div>
+
+      <div class="category-card-actions">
+        <button class="primary save-category-btn">Save changes</button>
+        <button class="danger delete-category-btn">Delete category</button>
+        <span class="save-ok" hidden>Saved.</span>
+      </div>
+    </article>
+  </template>
+
+  <template id="questionTemplate">
+    <div class="question-row">
+      <input class="q-label-en" placeholder="Question (English)" />
+      <input class="q-label-fr" placeholder="Question (Français)" />
+      <select class="q-style">
+        <option value="paragraph">Long answer</option>
+        <option value="short">Short answer</option>
+      </select>
+      <label class="q-required"><input type="checkbox" checked /> Required</label>
+      <button class="icon-btn remove-question-btn" title="Remove question">✕</button>
+    </div>
+  </template>
+
+  <script src="/dashboard/assets/app.js"></script>
+</body>
+</html>
