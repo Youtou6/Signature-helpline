@@ -21,7 +21,9 @@
     <button class="tab-btn active" data-tab="settings">Paramètres</button>
     <button class="tab-btn" data-tab="categories">Catégories</button>
     <button class="tab-btn" data-tab="texts">Textes</button>
+    <button class="tab-btn" data-tab="tickets">Tickets ouverts</button>
     <button class="tab-btn" data-tab="reviews">Avis &amp; Transcripts</button>
+    <button class="tab-btn" data-tab="bans">Bannis</button>
   </nav>
 
   <main class="wrap">
@@ -39,6 +41,10 @@
           <span>Rôle pingé pour chaque nouveau ticket</span>
           <span class="hint">En plus des rôles spécifiques à la catégorie. Laisse sur "Aucun" pour ne pinguer que les rôles de la catégorie.</span>
           <select id="pingRoleId"><option value="">Aucun</option></select>
+        </label>
+        <label class="field inline">
+          <input id="anonymousReplies" type="checkbox" />
+          <span>Réponses anonymes (l'utilisateur voit le nom de l'équipe, jamais le pseudo du staff)</span>
         </label>
         <button id="saveSettings" class="primary">Enregistrer</button>
         <span class="save-ok" id="settingsSaved" hidden>Enregistré.</span>
@@ -133,6 +139,36 @@
         <div id="textsList" class="texts-list"></div>
         <button id="saveTexts" class="primary">Enregistrer les textes</button>
         <span class="save-ok" id="textsSaved" hidden>Enregistré.</span>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="tickets" hidden>
+      <div class="panel">
+        <h2>Tickets ouverts</h2>
+        <p class="hint">Les tickets en cours. Clique sur un ticket pour voir la conversation et ajouter une note visible uniquement par le staff.</p>
+        <div class="hairline"></div>
+        <div id="openTicketsList" class="archive-list"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="bans" hidden>
+      <div class="panel">
+        <h2>Utilisateurs bannis</h2>
+        <p class="hint">Un utilisateur banni ne peut plus ouvrir de nouveau ticket (il reçoit un message l'informant que ce n'est pas possible). Pour trouver un ID Discord : mode développeur activé, clic droit sur le membre &gt; Copier l'identifiant.</p>
+        <div class="hairline"></div>
+        <div class="field-row">
+          <label class="field">
+            <span>ID Discord de l'utilisateur</span>
+            <input id="banUserId" type="text" placeholder="123456789012345678" />
+          </label>
+          <label class="field">
+            <span>Raison (facultatif)</span>
+            <input id="banReason" type="text" placeholder="Abus répétés" />
+          </label>
+        </div>
+        <button id="addBanBtn" class="danger">🚫 Bannir</button>
+        <div class="hairline"></div>
+        <div id="bansList" class="archive-list"></div>
       </div>
     </section>
 

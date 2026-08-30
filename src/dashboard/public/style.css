@@ -356,5 +356,28 @@ button.danger:hover { background: var(--danger-dim); color: var(--ink); }
 .transcript-attachments { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
 .transcript-attachments a { color: var(--gold); font-size: 12px; text-decoration: none; }
 .transcript-attachments a:hover { text-decoration: underline; }
+
+.note-form { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 8px; }
+.note-form .note-author {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 7px 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  max-width: 220px;
+}
+.note-form .note-content {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  min-height: 50px;
+  resize: vertical;
+}
+.note-form .note-submit-btn { align-self: flex-start; }
 .transcript-comment { font-style: italic; color: var(--ink-dim); margin-top: 6px; font-size: 12px; }
 

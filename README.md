@@ -18,8 +18,20 @@ A custom Discord modmail bot for the **Signature** server.
   existing Discord channels, including a best-effort replay of the conversation.
 - **Bot status**: set what the bot is shown as doing ("Watching for new tickets", "Listening to...", a
   Twitch stream, etc.) and its online/idle/dnd status, right from the dashboard.
-- **Styled messages**: every message the bot sends — the ticket card, DM confirmations, relayed messages
-  between staff and user — is a real Discord **container** (Components V2), not a classic embed.
+- **Staff tools on every ticket**: besides Close/Redirect/Claim, staff get **Remind now** (send the
+  inactivity warning immediately instead of waiting 24h) and **Ban user** (bans them from opening new
+  tickets and closes this one, with a confirmation step).
+- **Bans**: manage a ban list from the dashboard — banned users get a polite message instead of being able
+  to open a ticket.
+- **Staff notes from the dashboard**: add a note (visible to staff only) to any open or closed ticket
+  directly from the dashboard, not just via the `!note` chat prefix.
+- **Anonymous mode**: an optional setting so users only ever see "Signature Support", never the individual
+  staff member's tag, when someone replies.
+- **Text transcript in the logs**: on top of the dashboard archive, closing a ticket also drops a full
+  `.txt` transcript as a file attachment in `#modmail-logs`.
+- **Styled messages, no accent bar**: every message the bot sends — the ticket card, DM confirmations,
+  relayed messages between staff and user — is a real Discord **container** (Components V2), not a classic
+  embed, and without the colored side-bar embeds have (so it never reads as "a fancy embed").
 - **Rich transcripts**: the archived transcript for each closed ticket includes every real message
   (with attachments), internal notes, and system events (opened, redirected, claimed, closed, rated,
   commented) — the full staff-side history, not a summary.
@@ -167,23 +179,28 @@ database (e.g. free MongoDB Atlas), are the two real options — happy to wire e
 
 ## 6. Managing everything from the dashboard
 
-Open `/dashboard`, log in, and use the four tabs:
+Open `/dashboard`, log in, and use the six tabs:
 
-- **Paramètres** — support team name, the extra "ping all staff" role for new tickets, the bot's Discord
-  status (activity type + text + online/idle/dnd), the auto-close timing, and the config export/import
-  buttons.
+- **Paramètres** — support team name, anonymous replies toggle, the extra "ping all staff" role for new
+  tickets, the bot's Discord status (activity type + text + online/idle/dnd), the auto-close timing, and
+  the config export/import buttons.
 - **Catégories** — for each category: emoji + English/French label, which roles can see its tickets, and
   its questions. A question is either a **text answer** or a **multiple choice** (which becomes a select
   menu). Any question can be set to "Afficher seulement si" (only show if) an *earlier* choice question in
   the same category was answered a specific way — this is what powers "Custom Services → which service? →
   a different follow-up question per answer". Questions are asked in the order they appear in the list.
 - **Textes** — every bilingual message the bot sends during the ticket flow (welcome message, ticket
-  created/closed DMs, inactivity warning, rating request, redirect notice, redirect follow-up prompt, etc.),
-  fully editable.
+  created/closed DMs, inactivity warning, rating request, redirect notice, redirect follow-up prompt, the
+  banned-user message, etc.), fully editable.
+- **Tickets ouverts** — every currently open ticket, with its conversation so far. Click a row to expand it
+  and add a staff-only note.
 - **Avis & Transcripts** — average rating and total ratings at a glance, plus every closed ticket with its
   full conversation transcript (click a row to expand it — includes staff/user messages, internal notes,
-  *and* system events like "ticket opened", "redirected", "claimed"). Each row has a 🗑️ button to
-  permanently delete a test ticket/review.
+  *and* system events like "ticket opened", "redirected", "claimed", "rated"), with the same ability to add
+  a note. Each row has a 🗑️ button to permanently delete a test ticket/review.
+- **Bannis** — add or remove a Discord user ID from the ban list. Banned users get a polite "you can't open
+  a ticket" message instead of starting the intake flow.
+
 
 Click **+ Nouvelle catégorie** to add something like "Custom Services" from scratch — it appears in the
 Discord menu immediately (until the disk resets, see above).
@@ -193,11 +210,14 @@ Discord menu immediately (until the disk resets, see above).
 - `/close` — closes the current ticket channel (must be run inside a ticket channel).
 - `/ping` — quick check that the bot is online.
 
-Staff can also use the **Close ticket**, **Redirect**, and **Claim**/**Unclaim** buttons posted
-automatically at the top of every ticket channel. Redirect lets staff move a ticket to a different category
-(e.g. a player opened "Other" but actually wants a custom order) — it re-assigns which roles can see the
-channel to match the new category, unclaims the ticket, posts a notice in the channel, and DMs the user to
-answer the new category's questions if it has any (their answers get posted back into the same channel).
+Staff can also use the **Close ticket**, **Redirect**, **Claim**/**Unclaim**, **Remind now**, and
+**Ban user** buttons posted automatically at the top of every ticket channel. Redirect lets staff move a
+ticket to a different category (e.g. a player opened "Other" but actually wants a custom order) — it
+re-assigns which roles can see the channel to match the new category, unclaims the ticket, posts a notice
+in the channel, and DMs the user to answer the new category's questions if it has any (their answers get
+posted back into the same channel). **Remind now** immediately sends the inactivity warning (instead of
+waiting for the 24h timer) and starts the 1h auto-close countdown. **Ban user** asks for confirmation, then
+bans the user from opening future tickets and closes this one.
 
 ## 8. Notes on behavior
 

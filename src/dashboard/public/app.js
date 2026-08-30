@@ -31,6 +31,8 @@
         btn.classList.add('active');
         document.querySelector(`[data-tab-panel="${btn.dataset.tab}"]`).hidden = false;
         if (btn.dataset.tab === 'reviews') loadReviews();
+        if (btn.dataset.tab === 'tickets') loadOpenTickets();
+        if (btn.dataset.tab === 'bans') loadBans();
       });
     });
   }
@@ -246,6 +248,10 @@
     { key: 'ratingThanksDM', label: 'Remerciement après avis' },
     { key: 'ratingCommentPrompt', label: 'Invitation à laisser un commentaire' },
     { key: 'redirectNotice', label: 'Message de redirection (utilise {from}, {to}, {staff})' },
+    { key: 'redirectFollowupPromptDM', label: 'Invitation à répondre au nouveau questionnaire (après redirection)' },
+    { key: 'redirectSimpleNoticeDM', label: 'Notice de redirection simple (sans nouvelles questions)' },
+    { key: 'redirectFollowupDoneDM', label: 'Confirmation après le nouveau questionnaire' },
+    { key: 'bannedDM', label: 'Message affiché à un utilisateur banni', single: true },
   ];
 
   function renderTexts() {
@@ -294,6 +300,52 @@
 
   // ---- Reviews / transcripts tab ----
   let reviewsLoaded = false;
+  const TRANSCRIPT_ICONS = { user: '👤', staff: '🛠️', note: '📝', system: 'ℹ️' };
+
+  function renderTranscriptBox(transcript, ratingComment) {
+    const box = document.createElement('div');
+    box.className = 'archive-transcript';
+    if (!transcript.length) {
+      box.innerHTML = '<p class="hint">Aucun message échangé.</p>';
+    } else {
+      for (const m of transcript) {
+        const line = document.createElement('div');
+        line.className = `transcript-entry ${m.from}`;
+        const time = new Date(m.at).toLocaleTimeString('fr-FR');
+        const attachmentsHtml = (m.attachments || [])
+          .map((url, i) => `<a href="${url}" target="_blank" rel="noopener">📎 pièce jointe ${i + 1}</a>`)
+          .join(' ');
+        line.innerHTML = `<span class="who">${TRANSCRIPT_ICONS[m.from] || '•'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>${attachmentsHtml ? `<div class="transcript-attachments">${attachmentsHtml}</div>` : ''}`;
+        box.appendChild(line);
+      }
+    }
+    if (ratingComment) {
+      const c = document.createElement('div');
+      c.className = 'transcript-comment';
+      c.textContent = `💬 Commentaire : ${ratingComment}`;
+      box.appendChild(c);
+    }
+    return box;
+  }
+
+  function appendNoteForm(container, onSubmit) {
+    const form = document.createElement('div');
+    form.className = 'note-form';
+    form.innerHTML = `
+      <input class="note-author" placeholder="Ton nom (optionnel)" />
+      <textarea class="note-content" placeholder="Ajouter une note visible uniquement par le staff..."></textarea>
+      <button class="ghost note-submit-btn">📝 Ajouter la note</button>
+    `;
+    form.querySelector('.note-submit-btn').addEventListener('click', async () => {
+      const author = form.querySelector('.note-author').value;
+      const content = form.querySelector('.note-content').value;
+      if (!content.trim()) return;
+      await onSubmit(author, content);
+      form.querySelector('.note-content').value = '';
+    });
+    container.appendChild(form);
+  }
+
   async function loadReviews() {
     if (reviewsLoaded) return;
     reviewsLoaded = true;
@@ -345,39 +397,111 @@
         if (blocks2[1]) blocks2[1].textContent = String(newStats.ratedCount);
         if (blocks2[2]) blocks2[2].textContent = String(newStats.totalClosed);
       });
-      let expanded = false;
       row.addEventListener('click', async () => {
-        expanded = !expanded;
         const existing = row.querySelector('.archive-transcript');
         if (existing) {
           existing.remove();
           return;
         }
         const full = await api(`/api/archive/${entry.id}`);
-        const box = document.createElement('div');
-        box.className = 'archive-transcript';
-        if (!full.transcript.length) {
-          box.innerHTML = '<p class="hint">Aucun message échangé.</p>';
-        } else {
-          const icons = { user: '👤', staff: '🛠️', note: '📝', system: 'ℹ️' };
-          for (const m of full.transcript) {
-            const line = document.createElement('div');
-            line.className = `transcript-entry ${m.from}`;
-            const time = new Date(m.at).toLocaleTimeString('fr-FR');
-            const attachmentsHtml = (m.attachments || [])
-              .map((url, i) => `<a href="${url}" target="_blank" rel="noopener">📎 pièce jointe ${i + 1}</a>`)
-              .join(' ');
-            line.innerHTML = `<span class="who">${icons[m.from] || '•'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>${attachmentsHtml ? `<div class="transcript-attachments">${attachmentsHtml}</div>` : ''}`;
-            box.appendChild(line);
-          }
-        }
-        if (full.rating && full.rating.comment) {
-          const c = document.createElement('div');
-          c.className = 'transcript-comment';
-          c.textContent = `💬 Commentaire : ${full.rating.comment}`;
-          box.appendChild(c);
-        }
+        const box = renderTranscriptBox(full.transcript, full.rating && full.rating.comment);
+        appendNoteForm(box, async (author, content) => {
+          await api(`/api/archive/${entry.id}/note`, { method: 'POST', body: JSON.stringify({ author, content }) });
+          const refreshed = await api(`/api/archive/${entry.id}`);
+          box.replaceWith(renderTranscriptBox(refreshed.transcript, refreshed.rating && refreshed.rating.comment));
+        });
         row.appendChild(box);
+      });
+      listEl.appendChild(row);
+    }
+  }
+
+  // ---- Open tickets ----
+  let ticketsLoaded = false;
+  async function loadOpenTickets() {
+    if (ticketsLoaded) return;
+    ticketsLoaded = true;
+    const tickets = await api('/api/tickets');
+    const listEl = document.getElementById('openTicketsList');
+    listEl.innerHTML = '';
+    if (!tickets.length) {
+      listEl.innerHTML = '<p class="hint">Aucun ticket ouvert actuellement.</p>';
+      return;
+    }
+    for (const ticket of tickets) {
+      const cat = config.categories.find((c) => c.id === ticket.categoryId);
+      const row = document.createElement('div');
+      row.className = 'archive-row';
+      const opened = new Date(ticket.openedAt).toLocaleString('fr-FR');
+      row.innerHTML = `
+        <div class="archive-row-head">
+          <span>&lt;@${ticket.userId}&gt; — ${cat ? cat.label_en : ticket.categoryId}</span>
+          <span class="stars">${ticket.claimedByTag ? '🙋 ' + ticket.claimedByTag : ''}</span>
+        </div>
+        <div class="archive-row-meta">Ouvert le ${opened} (${(ticket.language || 'en').toUpperCase()}) — ${ticket.staffReplied ? 'staff a répondu' : 'en attente du staff'}</div>
+      `;
+      row.addEventListener('click', async () => {
+        const existing = row.querySelector('.archive-transcript');
+        if (existing) {
+          existing.remove();
+          return;
+        }
+        const full = await api(`/api/tickets/${ticket.userId}`);
+        const box = renderTranscriptBox(full.transcript || []);
+        appendNoteForm(box, async (author, content) => {
+          await api(`/api/tickets/${ticket.userId}/note`, { method: 'POST', body: JSON.stringify({ author, content }) });
+          const refreshed = await api(`/api/tickets/${ticket.userId}`);
+          box.replaceWith(renderTranscriptBox(refreshed.transcript || []));
+        });
+        row.appendChild(box);
+      });
+      listEl.appendChild(row);
+    }
+  }
+
+  // ---- Bans ----
+  let bansLoaded = false;
+  async function loadBans() {
+    if (bansLoaded) return;
+    bansLoaded = true;
+    await refreshBansList();
+    document.getElementById('addBanBtn').addEventListener('click', async () => {
+      const userId = document.getElementById('banUserId').value.trim();
+      const reason = document.getElementById('banReason').value.trim();
+      if (!userId) return;
+      try {
+        await api('/api/bans', { method: 'POST', body: JSON.stringify({ userId, reason }) });
+        document.getElementById('banUserId').value = '';
+        document.getElementById('banReason').value = '';
+        await refreshBansList();
+      } catch (err) {
+        alert("Impossible d'ajouter ce ban (ID invalide ou déjà banni).");
+      }
+    });
+  }
+
+  async function refreshBansList() {
+    const list = await api('/api/bans');
+    const listEl = document.getElementById('bansList');
+    listEl.innerHTML = '';
+    if (!list.length) {
+      listEl.innerHTML = '<p class="hint">Aucun utilisateur banni.</p>';
+      return;
+    }
+    for (const b of list) {
+      const row = document.createElement('div');
+      row.className = 'archive-row';
+      const date = new Date(b.bannedAt).toLocaleString('fr-FR');
+      row.innerHTML = `
+        <div class="archive-row-head">
+          <span>&lt;@${b.userId}&gt; (\`${b.userId}\`)</span>
+          <button class="icon-btn remove-ban-btn" title="Débannir">🗑️</button>
+        </div>
+        <div class="archive-row-meta">${b.reason || 'Pas de raison indiquée'} — banni le ${date}</div>
+      `;
+      row.querySelector('.remove-ban-btn').addEventListener('click', async () => {
+        await api(`/api/bans/${b.userId}`, { method: 'DELETE' });
+        row.remove();
       });
       listEl.appendChild(row);
     }
@@ -397,6 +521,7 @@
       pingSelect.appendChild(opt);
     }
     pingSelect.value = config.settings.pingRoleId || '';
+    document.getElementById('anonymousReplies').checked = !!config.settings.anonymousReplies;
 
     const presence = config.settings.presence || {};
     document.getElementById('presenceType').value = presence.type || 'WATCHING';
@@ -467,6 +592,7 @@
         body: JSON.stringify({
           teamName: document.getElementById('teamName').value,
           pingRoleId: document.getElementById('pingRoleId').value,
+          anonymousReplies: document.getElementById('anonymousReplies').checked,
           autoClose: {
             enabled: document.getElementById('autoCloseEnabled').checked,
             inactivityHours: document.getElementById('inactivityHours').value,

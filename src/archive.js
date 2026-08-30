@@ -86,4 +86,23 @@ function getStats() {
   };
 }
 
-module.exports = { addEntry, getById, setRating, deleteEntry, appendTranscriptEntry, listSummaries, getStats, readAll };
+function buildTranscriptText(entry) {
+  const lines = [];
+  lines.push('SIGNATURE — MODMAIL TRANSCRIPT');
+  lines.push('='.repeat(42));
+  lines.push(`User: ${entry.userTag} (${entry.userId})`);
+  lines.push(`Category: ${entry.categoryLabelEn}`);
+  lines.push(`Language: ${entry.language}`);
+  lines.push(`Opened: ${new Date(entry.openedAt).toISOString()}`);
+  lines.push(`Closed: ${new Date(entry.closedAt).toISOString()} by ${entry.closedBy} (${entry.closedReason})`);
+  lines.push('='.repeat(42));
+  lines.push('');
+  for (const m of entry.transcript || []) {
+    const time = new Date(m.at).toISOString().replace('T', ' ').slice(0, 19);
+    lines.push(`[${time}] ${m.authorTag} (${m.from}): ${m.content || ''}`);
+    for (const url of m.attachments || []) lines.push(`    attachment: ${url}`);
+  }
+  return lines.join('\n');
+}
+
+module.exports = { addEntry, getById, setRating, deleteEntry, appendTranscriptEntry, listSummaries, getStats, buildTranscriptText, readAll };

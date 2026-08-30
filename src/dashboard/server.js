@@ -2,6 +2,8 @@ const express = require('express');
 const path = require('path');
 const { getConfig, saveConfig, slugify, MAX_QUESTIONS_PER_CATEGORY } = require('../config');
 const archive = require('../archive');
+const store = require('../store');
+const bans = require('../bans');
 const persistence = require('../persistence');
 const { applyPresence } = require('../bot');
 
@@ -82,6 +84,7 @@ module.exports = function dashboardRouter(client) {
     const cfg = getConfig();
     cfg.settings.teamName = req.body.teamName ?? cfg.settings.teamName;
     cfg.settings.pingRoleId = req.body.pingRoleId ?? cfg.settings.pingRoleId;
+    cfg.settings.anonymousReplies = req.body.anonymousReplies ?? cfg.settings.anonymousReplies;
     if (req.body.presence) {
       cfg.settings.presence = {
         type: ['PLAYING', 'LISTENING', 'WATCHING', 'COMPETING', 'STREAMING'].includes(req.body.presence.type) ? req.body.presence.type : 'WATCHING',
@@ -197,6 +200,70 @@ module.exports = function dashboardRouter(client) {
     }
     saveConfig(incoming);
     applyPresence(client);
+    res.json({ ok: true });
+  });
+
+  // ---- Open tickets (live, not yet closed) ----
+
+  router.get('/api/tickets', requireAuth, (req, res) => {
+    const all = store.readAll();
+    const list = Object.entries(all).map(([userId, ticket]) => ({
+      userId,
+      channelId: ticket.channelId,
+      categoryId: ticket.categoryId,
+      language: ticket.language,
+      openedAt: ticket.openedAt,
+      lastActivityAt: ticket.lastActivityAt,
+      staffReplied: ticket.staffReplied,
+      claimedByTag: ticket.claimedByTag,
+    }));
+    list.sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+    res.json(list);
+  });
+
+  router.get('/api/tickets/:userId', requireAuth, (req, res) => {
+    const ticket = store.getTicketByUser(req.params.userId);
+    if (!ticket) return res.status(404).json({ error: 'Not found' });
+    res.json({ userId: req.params.userId, ...ticket });
+  });
+
+  router.post('/api/tickets/:userId/note', requireAuth, express.json(), (req, res) => {
+    const ticket = store.getTicketByUser(req.params.userId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    const author = (req.body.author || 'Dashboard').slice(0, 80);
+    const content = (req.body.content || '').slice(0, 1000);
+    if (!content.trim()) return res.status(400).json({ error: 'Note cannot be empty' });
+    store.appendTranscript(req.params.userId, { from: 'note', authorTag: `${author} (dashboard)`, content });
+    res.json({ ok: true });
+  });
+
+  router.post('/api/archive/:id/note', requireAuth, express.json(), (req, res) => {
+    const entry = archive.getById(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    const author = (req.body.author || 'Dashboard').slice(0, 80);
+    const content = (req.body.content || '').slice(0, 1000);
+    if (!content.trim()) return res.status(400).json({ error: 'Note cannot be empty' });
+    archive.appendTranscriptEntry(req.params.id, { from: 'note', authorTag: `${author} (dashboard)`, content });
+    res.json({ ok: true });
+  });
+
+  // ---- Bans ----
+
+  router.get('/api/bans', requireAuth, (req, res) => {
+    res.json(bans.listBans());
+  });
+
+  router.post('/api/bans', requireAuth, express.json(), (req, res) => {
+    const userId = (req.body.userId || '').trim();
+    if (!/^\d{5,25}$/.test(userId)) return res.status(400).json({ error: 'That does not look like a valid Discord user ID.' });
+    const added = bans.addBan(userId, req.body.reason || '', 'Dashboard');
+    if (!added) return res.status(409).json({ error: 'This user is already banned.' });
+    res.json({ ok: true });
+  });
+
+  router.delete('/api/bans/:userId', requireAuth, (req, res) => {
+    const removed = bans.removeBan(req.params.userId);
+    if (!removed) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
   });
 

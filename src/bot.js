@@ -24,6 +24,7 @@ const {
 const { getConfig, saveConfig, getCategory } = require('./config');
 const store = require('./store');
 const archive = require('./archive');
+const bans = require('./bans');
 const { t, fill } = require('./i18n');
 const { planNext, buildChoiceRow, buildModalForBatch } = require('./flow');
 
@@ -31,7 +32,6 @@ const { planNext, buildChoiceRow, buildModalForBatch } = require('./flow');
 // restarts, the user simply gets asked again on their next DM).
 const pendingFlows = new Map(); // userId -> { step, lang, categoryId, answers, ..., redirectChannelId? }
 
-const GOLD = 0xc6a664;
 const AUTO_CLOSE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const RESTART_KEYWORDS = ['restart', 'recommencer', 'annuler', 'cancel', 'reset'];
 const MODMAIL_CATEGORY_NAME = 'Modmail Tickets';
@@ -53,12 +53,11 @@ function sanitizeChannelName(name) {
   );
 }
 
-// ---- "Signature" styled messages — real Components V2 containers, no embeds anywhere ----
+// ---- "Signature" styled messages — plain containers (no accent colour bar, so
+// they never read as a disguised embed), no embeds anywhere in this bot. ----
 
 function styledPayload(text, actionRows = []) {
-  const container = new ContainerBuilder()
-    .setAccentColor(GOLD)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
+  const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
   if (actionRows.length) {
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     for (const row of actionRows) container.addActionRowComponents(row);
@@ -74,7 +73,7 @@ function relayPayload(tag, avatarURL, content, files) {
   const section = new SectionBuilder()
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`**${tag}**`), new TextDisplayBuilder().setContent(content || '*(no text content)*'))
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatarURL));
-  const container = new ContainerBuilder().setAccentColor(GOLD).addSectionComponents(section);
+  const container = new ContainerBuilder().addSectionComponents(section);
   return { flags: MessageFlags.IsComponentsV2, components: [container], files: files || [] };
 }
 
@@ -195,17 +194,17 @@ async function ensureLogChannel(guild, client) {
     type: ChannelType.GuildText,
     parent: parentId,
     permissionOverwrites: overwrites,
-    topic: 'Automatic log of modmail events (tickets opened/closed/redirected/claimed).',
+    topic: 'Automatic log of modmail events (tickets opened/closed/redirected/claimed/banned).',
   });
   cfg.settings.logChannelId = created.id;
   saveConfig(cfg);
   return created;
 }
 
-async function logEvent(guild, client, content) {
+async function logEvent(guild, client, content, files) {
   try {
     const channel = await ensureLogChannel(guild, client);
-    await channel.send({ content: content.slice(0, 1900) });
+    await channel.send({ content: content.slice(0, 1900), files: files || [] });
   } catch (err) {
     console.error('logEvent error:', err);
   }
@@ -257,7 +256,6 @@ function buildTicketContainer(cfg, user, category, lang, answers, claimedBy) {
   }
 
   const container = new ContainerBuilder()
-    .setAccentColor(GOLD)
     .addSectionComponents(header)
     .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(meta));
@@ -268,16 +266,16 @@ function buildTicketContainer(cfg, user, category, lang, answers, claimedBy) {
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(qaBlocks.join('\n\n').slice(0, 3900)));
   }
 
-  container
-    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
-    .addActionRowComponents(buildTicketActionRow(user.id, !!claimedBy))
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${cfg.settings.teamName}`));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  for (const row of buildTicketActionRows(user.id, !!claimedBy)) container.addActionRowComponents(row);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${cfg.settings.teamName}`));
 
   return container;
 }
 
-function buildTicketActionRow(userId, claimed) {
-  return new ActionRowBuilder().addComponents(
+// Two rows: primary actions, then secondary/staff-tool actions.
+function buildTicketActionRows(userId, claimed) {
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`modmail:close:${userId}`).setLabel('Close ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`modmail:redirect:${userId}`).setLabel('Redirect').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
@@ -286,6 +284,11 @@ function buildTicketActionRow(userId, claimed) {
       .setEmoji('🙋')
       .setStyle(claimed ? ButtonStyle.Secondary : ButtonStyle.Success),
   );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`modmail:remind:${userId}`).setLabel('Remind now').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`modmail:ban:${userId}`).setLabel('Ban user').setEmoji('🚫').setStyle(ButtonStyle.Danger),
+  );
+  return [row1, row2];
 }
 
 async function refreshTicketMessage(client, guild, userId, ticket) {
@@ -462,8 +465,12 @@ async function startRedirectQuestionnaire(client, userId, newCategory, lang, cha
 async function handleNewDM(message) {
   const userId = message.author.id;
   if (pendingFlows.has(userId)) return; // already mid-flow, buttons already sent
-  pendingFlows.set(userId, { step: 'language' });
   const cfg = getConfig();
+  if (bans.isBanned(userId)) {
+    await message.channel.send(styledPayload(t(cfg, 'en', 'bannedDM'))).catch(() => {});
+    return;
+  }
+  pendingFlows.set(userId, { step: 'language' });
   await message.channel.send(styledPayload(t(cfg, 'en', 'welcome'), [buildLanguageRow()])).catch(() => {});
 }
 
@@ -531,8 +538,9 @@ async function handleGuildMessage(message) {
   if (!user) return;
 
   const cfg = getConfig();
+  const displayTag = cfg.settings.anonymousReplies ? cfg.settings.teamName : `${cfg.settings.teamName} — ${message.author.tag}`;
   const files = attachments.map((url) => ({ attachment: url }));
-  await user.send(relayPayload(`${cfg.settings.teamName} — ${message.author.tag}`, message.author.displayAvatarURL(), message.content, files)).catch(async () => {
+  await user.send(relayPayload(displayTag, message.author.displayAvatarURL(), message.content, files)).catch(async () => {
     await message.channel.send('⚠️ Could not deliver this message — the user may have DMs closed.').catch(() => {});
   });
 }
@@ -582,18 +590,19 @@ async function closeTicket(client, userId, closedBy, reason = 'staff') {
   };
   archive.addEntry(archiveEntry);
 
-  if (user) {
+  if (user && reason !== 'ban') {
     await user.send(styledPayload(t(cfg, ticket.language, 'ticketClosedDM'))).catch(() => {});
     await sendRatingRequest(user, ticket.language || 'en', archiveEntry.id).catch(() => {});
   }
   if (guild) {
-    await logEvent(
-      guild,
-      client,
+    const transcriptText = archive.buildTranscriptText(archiveEntry);
+    const logLabel =
       reason === 'auto'
         ? `⏱️ **Auto-closed (inactivity)** — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`
-        : `🔒 **Ticket closed** by ${closedBy} — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`,
-    );
+        : reason === 'ban'
+          ? `🚫 **Closed (user banned)** by ${closedBy} — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`
+          : `🔒 **Ticket closed** by ${closedBy} — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`;
+    await logEvent(guild, client, logLabel, [{ attachment: Buffer.from(transcriptText, 'utf8'), name: `transcript-${archiveEntry.id}.txt` }]);
   }
   if (channel) {
     await channel.delete(`Ticket closed by ${closedBy || 'staff'}`).catch(() => {});
@@ -622,18 +631,7 @@ function startAutoCloseScheduler(client) {
 
         if (!ticket.warningSentAt) {
           if (now - lastActivity >= inactivityMs) {
-            const user = await client.users.fetch(userId).catch(() => null);
-            if (user) await user.send(styledPayload(t(cfg, ticket.language || 'en', 'inactivityWarningDM'))).catch(() => {});
-            store.appendTranscript(userId, { from: 'system', authorTag: 'System', content: 'Inactivity warning sent to the user (auto-close in 1h if no reply).' });
-            store.updateTicket(userId, { warningSentAt: now });
-
-            const guild = client.guilds.cache.get(ticket.guildId);
-            const channel = guild?.channels.cache.get(ticket.channelId);
-            if (channel) {
-              await channel
-                .send('⏳ *No reply from the user in a while — a warning was just sent to them. This ticket will auto-close in about 1h if they stay silent.*')
-                .catch(() => {});
-            }
+            await sendInactivityWarning(client, userId, ticket);
           }
         } else if (now - ticket.warningSentAt >= graceMs) {
           await closeTicket(client, userId, `${cfg.settings.teamName} (auto-close)`, 'auto');
@@ -643,6 +641,23 @@ function startAutoCloseScheduler(client) {
       console.error('Auto-close scheduler error:', err);
     }
   }, AUTO_CLOSE_CHECK_INTERVAL_MS);
+}
+
+// Shared by the automatic 24h scheduler AND the staff "Remind now" button.
+async function sendInactivityWarning(client, userId, ticket) {
+  const cfg = getConfig();
+  const user = await client.users.fetch(userId).catch(() => null);
+  if (user) await user.send(styledPayload(t(cfg, ticket.language || 'en', 'inactivityWarningDM'))).catch(() => {});
+  store.appendTranscript(userId, { from: 'system', authorTag: 'System', content: 'Inactivity warning sent to the user (auto-close in 1h if no reply).' });
+  store.updateTicket(userId, { warningSentAt: Date.now(), staffReplied: true });
+
+  const guild = client.guilds.cache.get(ticket.guildId);
+  const channel = guild?.channels.cache.get(ticket.channelId);
+  if (channel) {
+    await channel
+      .send('⏳ *A warning was just sent to the user. This ticket will auto-close in about 1h if they stay silent.*')
+      .catch(() => {});
+  }
 }
 
 // ---- Recovering ticket state after a restart ----
@@ -920,6 +935,20 @@ function createBotClient() {
         return;
       }
 
+      // --- Remind now (manually trigger the inactivity warning) ---
+      if (interaction.isButton() && interaction.customId.startsWith('modmail:remind:')) {
+        const userId = interaction.customId.split(':')[2];
+        const ticket = store.getTicketByUser(userId);
+        if (!ticket) {
+          await interaction.reply({ content: 'This ticket is no longer open.', ephemeral: true });
+          return;
+        }
+        await sendInactivityWarning(interaction.client, userId, ticket);
+        await interaction.reply({ content: '⏳ Reminder sent to the user — auto-close in ~1h if they stay silent.', ephemeral: true });
+        if (interaction.guild) await logEvent(interaction.guild, interaction.client, `⏳ **Manual reminder** sent by ${interaction.user.tag} — <#${ticket.channelId}>`);
+        return;
+      }
+
       // --- Claim / Unclaim ---
       if (interaction.isButton() && interaction.customId.startsWith('modmail:claim:')) {
         const userId = interaction.customId.split(':')[2];
@@ -1014,6 +1043,32 @@ function createBotClient() {
         await startRedirectQuestionnaire(interaction.client, userId, newCategory, ticket.language || 'en', ticket.channelId);
 
         await interaction.update({ content: `✅ Redirected to ${newCategory.label_en}. The ticket has been unclaimed.`, components: [] });
+        return;
+      }
+
+      // --- Ban (with confirmation) ---
+      if (interaction.isButton() && interaction.customId.startsWith('modmail:ban:')) {
+        const userId = interaction.customId.split(':')[2];
+        const confirmRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`modmail:ban_confirm:${userId}`).setLabel('Confirm ban & close').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('modmail:ban_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+        );
+        await interaction.reply({ content: `⚠️ Ban <@${userId}> from opening new tickets, and close this one?`, components: [confirmRow], ephemeral: true });
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId === 'modmail:ban_cancel') {
+        await interaction.update({ content: 'Cancelled.', components: [] });
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith('modmail:ban_confirm:')) {
+        const userId = interaction.customId.split(':')[2];
+        const added = bans.addBan(userId, `Banned via ticket by ${interaction.user.tag}`, interaction.user.tag);
+        const ticket = store.getTicketByUser(userId);
+        if (ticket) await closeTicket(interaction.client, userId, interaction.user.tag, 'ban');
+        await interaction.update({ content: added ? `🚫 <@${userId}> has been banned and the ticket closed.` : `<@${userId}> was already banned. Ticket closed.`, components: [] });
+        if (interaction.guild) await logEvent(interaction.guild, interaction.client, `🚫 **User banned** by ${interaction.user.tag} — <@${userId}>`);
         return;
       }
 
