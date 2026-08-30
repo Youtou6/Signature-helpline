@@ -79,6 +79,7 @@ module.exports = function dashboardRouter(client) {
   router.put('/api/settings', requireAuth, express.json(), (req, res) => {
     const cfg = getConfig();
     cfg.settings.teamName = req.body.teamName ?? cfg.settings.teamName;
+    cfg.settings.pingRoleId = req.body.pingRoleId ?? cfg.settings.pingRoleId;
     if (req.body.autoClose) {
       cfg.settings.autoClose = {
         enabled: req.body.autoClose.enabled !== false,
@@ -159,6 +160,12 @@ module.exports = function dashboardRouter(client) {
     const entry = archive.getById(req.params.id);
     if (!entry) return res.status(404).json({ error: 'Not found' });
     res.json(entry);
+  });
+
+  router.delete('/api/archive/:id', requireAuth, (req, res) => {
+    const removed = archive.deleteEntry(req.params.id);
+    if (!removed) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
   });
 
   return router;

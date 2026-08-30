@@ -40,6 +40,9 @@ function createTicket(userId, ticket) {
     staffReplied: false,
     warningSentAt: null,
     archiveId: null,
+    ticketMessageId: null,
+    claimedBy: null,
+    claimedByTag: null,
     ...ticket,
   };
   writeAll(all);

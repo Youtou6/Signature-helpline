@@ -345,10 +345,13 @@ button.danger:hover { background: var(--danger-dim); color: var(--ink); }
 }
 .archive-row-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .archive-row-head .stars { color: var(--gold); white-space: nowrap; }
-.archive-row-meta { color: var(--ink-dim); font-size: 12px; margin-top: 4px; }
+.archive-row-meta { color: var(--ink-dim); font-size: 12px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center; }
+.archive-row-meta .icon-btn { width: 24px; height: 24px; font-size: 12px; }
 .archive-transcript { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .transcript-entry { font-size: 13px; line-height: 1.4; }
 .transcript-entry .who { color: var(--gold-dim); font-weight: 500; margin-right: 6px; }
 .transcript-entry.note .who { color: var(--danger); }
+.transcript-entry.system .who { color: var(--ink-dim); }
+.transcript-entry.system { font-style: italic; color: var(--ink-dim); }
 .transcript-comment { font-style: italic; color: var(--ink-dim); margin-top: 6px; font-size: 12px; }
 

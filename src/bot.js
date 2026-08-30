@@ -22,7 +22,7 @@ const { planNext, buildChoiceRow, buildModalForBatch } = require('./flow');
 
 // In-memory state for users mid-flow (not persisted on purpose: if the bot
 // restarts, the user simply gets asked again on their next DM).
-const pendingFlows = new Map(); // userId -> { step, lang, categoryId, answers, ... }
+const pendingFlows = new Map(); // userId -> { step, lang, categoryId, answers, ..., redirectChannelId? }
 
 const GOLD = 0xc6a664;
 const AUTO_CLOSE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -70,7 +70,12 @@ function buildOverwrites(guild, client, category) {
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     {
       id: client.user.id,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.MentionEveryone, // needed for role pings to actually notify, even if a role isn't "mentionable"
+      ],
     },
   ];
   for (const roleId of category.roleIds || []) {
@@ -92,6 +97,55 @@ async function ensureModmailCategory(guild) {
   cfg.settings.modmailCategoryId = created.id;
   saveConfig(cfg);
   return created.id;
+}
+
+async function ensureLogChannel(guild, client) {
+  const cfg = getConfig();
+  if (cfg.settings.logChannelId) {
+    const existing = guild.channels.cache.get(cfg.settings.logChannelId);
+    if (existing) return existing;
+  }
+  const parentId = await ensureModmailCategory(guild);
+  const overwrites = [{ id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }, { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }];
+  if (cfg.settings.pingRoleId) {
+    overwrites.push({ id: cfg.settings.pingRoleId, allow: [PermissionFlagsBits.ViewChannel] });
+  }
+  const created = await guild.channels.create({
+    name: 'modmail-logs',
+    type: ChannelType.GuildText,
+    parent: parentId,
+    permissionOverwrites: overwrites,
+    topic: 'Automatic log of modmail events (tickets opened/closed/redirected/claimed).',
+  });
+  cfg.settings.logChannelId = created.id;
+  saveConfig(cfg);
+  return created;
+}
+
+async function logEvent(guild, client, content) {
+  try {
+    const channel = await ensureLogChannel(guild, client);
+    await channel.send({ content: content.slice(0, 1900) });
+  } catch (err) {
+    console.error('logEvent error:', err);
+  }
+}
+
+function summarizeAnswers(category, lang, answers) {
+  const lines = [];
+  for (const [key, value] of Object.entries(answers || {})) {
+    if (value === null || value === undefined) continue;
+    const q = (category.questions || []).find((qq) => qq.id === key);
+    if (!q) continue;
+    let displayValue = value;
+    if (q.type === 'choice') {
+      const opt = (q.options || []).find((o) => o.id === value);
+      displayValue = opt ? (lang === 'fr' ? opt.label_fr : opt.label_en) : value;
+    }
+    const label = lang === 'fr' ? q.label_fr : q.label_en;
+    lines.push(`${label}: ${displayValue}`);
+  }
+  return lines.join('\n');
 }
 
 function buildTicketEmbed(cfg, user, category, lang, answers) {
@@ -124,11 +178,38 @@ function buildTicketEmbed(cfg, user, category, lang, answers) {
   return embed;
 }
 
-function buildTicketActionRow(userId) {
+function buildTicketActionRow(userId, claimed) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`modmail:close:${userId}`).setLabel('Close ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`modmail:redirect:${userId}`).setLabel('Redirect').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`modmail:claim:${userId}`)
+      .setLabel(claimed ? 'Unclaim' : 'Claim')
+      .setEmoji('🙋')
+      .setStyle(claimed ? ButtonStyle.Secondary : ButtonStyle.Success),
   );
+}
+
+async function refreshTicketMessage(client, guild, userId, ticket) {
+  const channel = guild.channels.cache.get(ticket.channelId);
+  if (!channel || !ticket.ticketMessageId) return;
+  const category = getCategory(ticket.categoryId);
+  const msg = await channel.messages.fetch(ticket.ticketMessageId).catch(() => null);
+  if (!msg || !msg.embeds[0]) return;
+
+  const fields = msg.embeds[0].fields.map((f) => ({ ...f }));
+  const catIdx = fields.findIndex((f) => f.name === 'Category');
+  if (catIdx !== -1 && category) fields[catIdx].value = category.label_en;
+  const claimIdx = fields.findIndex((f) => f.name === 'Claimed by');
+  if (ticket.claimedBy) {
+    const claimField = { name: 'Claimed by', value: `<@${ticket.claimedBy}>`, inline: true };
+    if (claimIdx !== -1) fields[claimIdx] = claimField;
+    else fields.push(claimField);
+  } else if (claimIdx !== -1) {
+    fields.splice(claimIdx, 1);
+  }
+  const embed = EmbedBuilder.from(msg.embeds[0]).setFields(fields);
+  await msg.edit({ embeds: [embed], components: [buildTicketActionRow(userId, !!ticket.claimedBy)] }).catch(() => {});
 }
 
 async function createTicketChannel(client, guild, user, category, lang, answers) {
@@ -144,8 +225,11 @@ async function createTicketChannel(client, guild, user, category, lang, answers)
   });
 
   const embed = buildTicketEmbed(cfg, user, category, lang, answers);
-  const pingContent = category.roleIds?.length ? category.roleIds.map((r) => `<@&${r}>`).join(' ') : undefined;
-  await channel.send({ content: pingContent, embeds: [embed], components: [buildTicketActionRow(user.id)] });
+  const pingParts = [...(category.roleIds || [])];
+  if (cfg.settings.pingRoleId && !pingParts.includes(cfg.settings.pingRoleId)) pingParts.push(cfg.settings.pingRoleId);
+  const pingContent = pingParts.length ? pingParts.map((r) => `<@&${r}>`).join(' ') : undefined;
+
+  const sentMessage = await channel.send({ content: pingContent, embeds: [embed], components: [buildTicketActionRow(user.id, false)] });
 
   store.createTicket(user.id, {
     channelId: channel.id,
@@ -153,14 +237,23 @@ async function createTicketChannel(client, guild, user, category, lang, answers)
     categoryId: category.id,
     language: lang,
     openedAt: Date.now(),
+    ticketMessageId: sentMessage.id,
   });
+
+  store.appendTranscript(user.id, {
+    from: 'system',
+    authorTag: 'System',
+    content: `Ticket opened — category: ${category.label_en}, language: ${lang}.${summarizeAnswers(category, lang, answers) ? `\n${summarizeAnswers(category, lang, answers)}` : ''}`,
+  });
+
+  await logEvent(guild, client, `🆕 **New ticket** — ${user.tag} — category **${category.label_en}** — <#${channel.id}>`);
 
   return channel;
 }
 
-// ---- Question flow presentation helpers ----
+// ---- Question flow presentation helpers (shared by the "new ticket" flow AND the "redirect follow-up" flow) ----
 
-async function finalizeTicket(interaction, mode, categoryId, lang, answers) {
+async function finalizeTicket(interaction, mode, categoryId, lang, answers, redirectChannelId) {
   const category = getCategory(categoryId);
   const guild = interaction.client.guilds.cache.get(process.env.GUILD_ID);
   const cfg = getConfig();
@@ -174,30 +267,51 @@ async function finalizeTicket(interaction, mode, categoryId, lang, answers) {
     return;
   }
 
+  if (redirectChannelId) {
+    const channel = guild.channels.cache.get(redirectChannelId);
+    if (channel) {
+      const embed = buildTicketEmbed(cfg, interaction.user, category, lang, answers).setTitle(
+        lang === 'fr' ? 'Réponses au nouveau questionnaire' : 'New questionnaire answers',
+      );
+      await channel.send({ embeds: [embed] }).catch(() => {});
+      const ticket = store.getTicketByUser(interaction.user.id);
+      if (ticket) {
+        store.appendTranscript(interaction.user.id, {
+          from: 'system',
+          authorTag: 'System',
+          content: `Redirect questionnaire answered:\n${summarizeAnswers(category, lang, answers)}`,
+        });
+      }
+    }
+    pendingFlows.delete(interaction.user.id);
+    await interaction.editReply({ content: t(cfg, lang, 'redirectFollowupDoneDM'), components: [] });
+    return;
+  }
+
   await createTicketChannel(interaction.client, guild, interaction.user, category, lang, answers);
   pendingFlows.delete(interaction.user.id);
   await interaction.editReply({ content: t(cfg, lang, 'ticketCreatedDM'), components: [] });
 }
 
-async function presentPlanFromSelect(interaction, plan, categoryId, lang) {
+async function presentPlanFromSelect(interaction, plan, categoryId, lang, redirectChannelId) {
   if (plan.type === 'choice') {
-    pendingFlows.set(interaction.user.id, { step: 'awaiting_choice', lang, categoryId, answers: plan.answers, currentQuestionId: plan.question.id });
+    pendingFlows.set(interaction.user.id, { step: 'awaiting_choice', lang, categoryId, answers: plan.answers, currentQuestionId: plan.question.id, redirectChannelId });
     const content = (lang === 'fr' ? plan.question.label_fr : plan.question.label_en) || '...';
     await interaction.update({ content, components: [buildChoiceRow(plan.question, lang)] });
     return;
   }
   if (plan.type === 'text') {
-    pendingFlows.set(interaction.user.id, { step: 'awaiting_modal', lang, categoryId, answers: plan.answers, currentBatchIds: plan.questions.map((q) => q.id) });
+    pendingFlows.set(interaction.user.id, { step: 'awaiting_modal', lang, categoryId, answers: plan.answers, currentBatchIds: plan.questions.map((q) => q.id), redirectChannelId });
     const cfg = getConfig();
     await interaction.showModal(buildModalForBatch(plan.questions, lang, t(cfg, lang, 'modalTitle')));
     return;
   }
-  await finalizeTicket(interaction, 'update', categoryId, lang, plan.answers);
+  await finalizeTicket(interaction, 'update', categoryId, lang, plan.answers, redirectChannelId);
 }
 
-async function presentPlanFromModalSubmit(interaction, plan, categoryId, lang) {
+async function presentPlanFromModalSubmit(interaction, plan, categoryId, lang, redirectChannelId) {
   if (plan.type === 'choice') {
-    pendingFlows.set(interaction.user.id, { step: 'awaiting_choice', lang, categoryId, answers: plan.answers, currentQuestionId: plan.question.id });
+    pendingFlows.set(interaction.user.id, { step: 'awaiting_choice', lang, categoryId, answers: plan.answers, currentQuestionId: plan.question.id, redirectChannelId });
     const content = (lang === 'fr' ? plan.question.label_fr : plan.question.label_en) || '...';
     await interaction.reply({ content, components: [buildChoiceRow(plan.question, lang)] });
     return;
@@ -205,14 +319,40 @@ async function presentPlanFromModalSubmit(interaction, plan, categoryId, lang) {
   if (plan.type === 'text') {
     // Discord does not allow chaining a modal directly from a modal submit -
     // ask the user to tap Continue, which is a button interaction and CAN open one.
-    pendingFlows.set(interaction.user.id, { step: 'awaiting_continue', lang, categoryId, answers: plan.answers, currentBatchIds: plan.questions.map((q) => q.id) });
+    pendingFlows.set(interaction.user.id, { step: 'awaiting_continue', lang, categoryId, answers: plan.answers, currentBatchIds: plan.questions.map((q) => q.id), redirectChannelId });
     const continueRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('modmail:continueModal').setLabel(lang === 'fr' ? 'Continuer' : 'Continue').setStyle(ButtonStyle.Primary),
     );
     await interaction.reply({ content: lang === 'fr' ? 'Merci ! Encore quelques questions.' : 'Thanks! A couple more questions.', components: [continueRow] });
     return;
   }
-  await finalizeTicket(interaction, 'reply', categoryId, lang, plan.answers);
+  await finalizeTicket(interaction, 'reply', categoryId, lang, plan.answers, redirectChannelId);
+}
+
+async function startRedirectQuestionnaire(client, userId, newCategory, lang, channelId) {
+  const user = await client.users.fetch(userId).catch(() => null);
+  if (!user) return;
+  const cfg = getConfig();
+  const plan = planNext(newCategory, {});
+
+  if (plan.type === 'done') {
+    await user.send(t(cfg, lang, 'redirectSimpleNoticeDM')).catch(() => {});
+    return;
+  }
+
+  const promptText = t(cfg, lang, 'redirectFollowupPromptDM');
+  if (plan.type === 'choice') {
+    pendingFlows.set(userId, { step: 'awaiting_choice', lang, categoryId: newCategory.id, answers: plan.answers, currentQuestionId: plan.question.id, redirectChannelId: channelId });
+    const content = `${promptText}\n\n${lang === 'fr' ? plan.question.label_fr : plan.question.label_en}`;
+    await user.send({ content, components: [buildChoiceRow(plan.question, lang)] }).catch(() => {});
+    return;
+  }
+  // type 'text' - a batch is ready but we need a button click before showModal is legal.
+  pendingFlows.set(userId, { step: 'awaiting_continue', lang, categoryId: newCategory.id, answers: plan.answers, currentBatchIds: plan.questions.map((q) => q.id), redirectChannelId: channelId });
+  const continueRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('modmail:continueModal').setLabel(lang === 'fr' ? 'Répondre' : 'Answer').setStyle(ButtonStyle.Primary),
+  );
+  await user.send({ content: promptText, components: [continueRow] }).catch(() => {});
 }
 
 // ---- DM intake ----
@@ -314,6 +454,13 @@ async function closeTicket(client, userId, closedBy, reason = 'staff') {
   const cfg = getConfig();
   const user = await client.users.fetch(userId).catch(() => null);
 
+  store.appendTranscript(userId, {
+    from: 'system',
+    authorTag: 'System',
+    content: reason === 'auto' ? 'Ticket auto-closed due to inactivity.' : `Ticket closed by ${closedBy}.`,
+  });
+  const freshTicket = store.getTicketByUser(userId);
+
   const archiveEntry = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     userId,
@@ -326,7 +473,7 @@ async function closeTicket(client, userId, closedBy, reason = 'staff') {
     closedAt: Date.now(),
     closedBy,
     closedReason: reason,
-    transcript: ticket.transcript || [],
+    transcript: freshTicket ? freshTicket.transcript || [] : ticket.transcript || [],
     rating: null,
   };
   archive.addEntry(archiveEntry);
@@ -334,6 +481,15 @@ async function closeTicket(client, userId, closedBy, reason = 'staff') {
   if (user) {
     await user.send(t(cfg, ticket.language, 'ticketClosedDM')).catch(() => {});
     await sendRatingRequest(user, ticket.language || 'en', archiveEntry.id).catch(() => {});
+  }
+  if (guild) {
+    await logEvent(
+      guild,
+      client,
+      reason === 'auto'
+        ? `⏱️ **Auto-closed (inactivity)** — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`
+        : `🔒 **Ticket closed** by ${closedBy} — ${archiveEntry.userTag} — category **${archiveEntry.categoryLabelEn}**`,
+    );
   }
   if (channel) {
     await channel.delete(`Ticket closed by ${closedBy || 'staff'}`).catch(() => {});
@@ -364,7 +520,16 @@ function startAutoCloseScheduler(client) {
           if (now - lastActivity >= inactivityMs) {
             const user = await client.users.fetch(userId).catch(() => null);
             if (user) await user.send(t(cfg, ticket.language || 'en', 'inactivityWarningDM')).catch(() => {});
+            store.appendTranscript(userId, { from: 'system', authorTag: 'System', content: 'Inactivity warning sent to the user (auto-close in 1h if no reply).' });
             store.updateTicket(userId, { warningSentAt: now });
+
+            const guild = client.guilds.cache.get(ticket.guildId);
+            const channel = guild?.channels.cache.get(ticket.channelId);
+            if (channel) {
+              await channel
+                .send('⏳ *No reply from the user in a while — a warning was just sent to them. This ticket will auto-close in about 1h if they stay silent.*')
+                .catch(() => {});
+            }
           }
         } else if (now - ticket.warningSentAt >= graceMs) {
           await closeTicket(client, userId, `${cfg.settings.teamName} (auto-close)`, 'auto');
@@ -425,11 +590,11 @@ function createBotClient() {
           return;
         }
         const plan = planNext(category, {});
-        await presentPlanFromSelect(interaction, plan, category.id, lang);
+        await presentPlanFromSelect(interaction, plan, category.id, lang, undefined);
         return;
       }
 
-      // --- Conditional question flow ---
+      // --- Conditional question flow (shared by new tickets AND redirect follow-ups) ---
       if (interaction.isStringSelectMenu() && interaction.customId === 'modmail:choice') {
         const pending = pendingFlows.get(interaction.user.id);
         if (!pending || pending.step !== 'awaiting_choice') {
@@ -443,7 +608,7 @@ function createBotClient() {
         }
         const answers = { ...pending.answers, [pending.currentQuestionId]: interaction.values[0] };
         const plan = planNext(category, answers);
-        await presentPlanFromSelect(interaction, plan, pending.categoryId, pending.lang);
+        await presentPlanFromSelect(interaction, plan, pending.categoryId, pending.lang, pending.redirectChannelId);
         return;
       }
 
@@ -461,7 +626,7 @@ function createBotClient() {
         const answers = { ...pending.answers };
         for (const id of pending.currentBatchIds) answers[id] = interaction.fields.getTextInputValue(id);
         const plan = planNext(category, answers);
-        await presentPlanFromModalSubmit(interaction, plan, pending.categoryId, pending.lang);
+        await presentPlanFromModalSubmit(interaction, plan, pending.categoryId, pending.lang, pending.redirectChannelId);
         return;
       }
 
@@ -477,7 +642,14 @@ function createBotClient() {
           return;
         }
         const questions = pending.currentBatchIds.map((id) => (category.questions || []).find((q) => q.id === id)).filter(Boolean);
-        pendingFlows.set(interaction.user.id, { step: 'awaiting_modal', lang: pending.lang, categoryId: pending.categoryId, answers: pending.answers, currentBatchIds: pending.currentBatchIds });
+        pendingFlows.set(interaction.user.id, {
+          step: 'awaiting_modal',
+          lang: pending.lang,
+          categoryId: pending.categoryId,
+          answers: pending.answers,
+          currentBatchIds: pending.currentBatchIds,
+          redirectChannelId: pending.redirectChannelId,
+        });
         const cfg = getConfig();
         await interaction.showModal(buildModalForBatch(questions, pending.lang, t(cfg, pending.lang, 'modalTitle')));
         return;
@@ -499,6 +671,39 @@ function createBotClient() {
         }
         await interaction.reply({ content: '🔒 Closing this ticket...', ephemeral: false });
         await closeTicket(interaction.client, ticket.userId, interaction.user.tag, 'staff');
+        return;
+      }
+
+      // --- Claim / Unclaim ---
+      if (interaction.isButton() && interaction.customId.startsWith('modmail:claim:')) {
+        const userId = interaction.customId.split(':')[2];
+        const ticket = store.getTicketByUser(userId);
+        if (!ticket) {
+          await interaction.reply({ content: 'This ticket is no longer open.', ephemeral: true });
+          return;
+        }
+        if (ticket.claimedBy && ticket.claimedBy !== interaction.user.id) {
+          await interaction.reply({ content: `Already claimed by <@${ticket.claimedBy}>.`, ephemeral: true });
+          return;
+        }
+        const nowClaiming = !ticket.claimedBy;
+        store.updateTicket(userId, nowClaiming ? { claimedBy: interaction.user.id, claimedByTag: interaction.user.tag } : { claimedBy: null, claimedByTag: null });
+        store.appendTranscript(userId, { from: 'system', authorTag: 'System', content: nowClaiming ? `Claimed by ${interaction.user.tag}` : `Unclaimed by ${interaction.user.tag}` });
+
+        const fields = (interaction.message.embeds[0]?.fields || []).map((f) => ({ ...f }));
+        const claimIdx = fields.findIndex((f) => f.name === 'Claimed by');
+        if (nowClaiming) {
+          const claimField = { name: 'Claimed by', value: `<@${interaction.user.id}>`, inline: true };
+          if (claimIdx !== -1) fields[claimIdx] = claimField;
+          else fields.push(claimField);
+        } else if (claimIdx !== -1) {
+          fields.splice(claimIdx, 1);
+        }
+        const embed = EmbedBuilder.from(interaction.message.embeds[0]).setFields(fields);
+        await interaction.update({ embeds: [embed], components: [buildTicketActionRow(userId, nowClaiming)] });
+        if (interaction.guild) {
+          await logEvent(interaction.guild, interaction.client, `${nowClaiming ? '🙋 **Claimed**' : '↩️ **Unclaimed**'} by ${interaction.user.tag} — <#${ticket.channelId}>`);
+        }
         return;
       }
 
@@ -536,10 +741,11 @@ function createBotClient() {
           return;
         }
         const oldCategory = getCategory(ticket.categoryId);
+        const cfg = getConfig();
         const channel = interaction.guild.channels.cache.get(ticket.channelId);
+
         if (channel) {
           await channel.permissionOverwrites.set(buildOverwrites(interaction.guild, interaction.client, newCategory));
-          const cfg = getConfig();
           const notice = fill(t(cfg, ticket.language || 'en', 'redirectNotice'), {
             from: oldCategory ? oldCategory.label_en : ticket.categoryId,
             to: newCategory.label_en,
@@ -547,8 +753,21 @@ function createBotClient() {
           });
           await channel.send(notice).catch(() => {});
         }
-        store.updateTicket(userId, { categoryId: newCategoryId });
-        await interaction.update({ content: `✅ Redirected to ${newCategory.label_en}.`, components: [] });
+
+        store.appendTranscript(userId, {
+          from: 'system',
+          authorTag: 'System',
+          content: `Redirected from ${oldCategory ? oldCategory.label_en : ticket.categoryId} to ${newCategory.label_en} by ${interaction.user.tag}. Ticket unclaimed.`,
+        });
+        store.updateTicket(userId, { categoryId: newCategoryId, claimedBy: null, claimedByTag: null });
+
+        const updatedTicket = store.getTicketByUser(userId);
+        await refreshTicketMessage(interaction.client, interaction.guild, userId, updatedTicket);
+        await logEvent(interaction.guild, interaction.client, `🔀 **Redirected** by ${interaction.user.tag} — ${oldCategory ? oldCategory.label_en : ticket.categoryId} → **${newCategory.label_en}** — <#${ticket.channelId}>`);
+
+        await startRedirectQuestionnaire(interaction.client, userId, newCategory, ticket.language || 'en', ticket.channelId);
+
+        await interaction.update({ content: `✅ Redirected to ${newCategory.label_en}. The ticket has been unclaimed.`, components: [] });
         return;
       }
 
@@ -567,6 +786,11 @@ function createBotClient() {
           content: `${'⭐'.repeat(stars)}\n${t(cfg, lang, 'ratingThanksDM')}\n\n${t(cfg, lang, 'ratingCommentPrompt')}`,
           components: [commentRow],
         });
+        if (interaction.guild === null) {
+          // This is a DM; find the guild via the archived entry to post a log line.
+          const guild = interaction.client.guilds.cache.get(entry?.guildId);
+          if (guild) await logEvent(guild, interaction.client, `⭐ **Rating received**: ${stars}/5 from ${entry.userTag} (${entry.categoryLabelEn})`);
+        }
         return;
       }
 

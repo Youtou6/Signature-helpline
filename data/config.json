@@ -3,6 +3,7 @@
     "teamName": "Signature Support",
     "modmailCategoryId": "",
     "logChannelId": "",
+    "pingRoleId": "",
     "autoClose": {
       "enabled": true,
       "inactivityHours": 24,
@@ -31,7 +32,13 @@
       "ratingCommentPrompt_en": "Want to add a comment? (optional)",
       "ratingCommentPrompt_fr": "Voulez-vous ajouter un commentaire ? (facultatif)",
       "redirectNotice_en": "🔀 This ticket was redirected from **{from}** to **{to}** by {staff}.",
-      "redirectNotice_fr": "🔀 Ce ticket a été redirigé de **{from}** vers **{to}** par {staff}."
+      "redirectNotice_fr": "🔀 Ce ticket a été redirigé de **{from}** vers **{to}** par {staff}.",
+      "redirectFollowupPromptDM_en": "Your ticket has been redirected to a different team. A couple more questions to help them assist you:",
+      "redirectFollowupPromptDM_fr": "Votre ticket a été redirigé vers une autre équipe. Encore quelques questions pour mieux vous aider :",
+      "redirectSimpleNoticeDM_en": "Your ticket has been redirected to a different team — they will get back to you shortly.",
+      "redirectSimpleNoticeDM_fr": "Votre ticket a été redirigé vers une autre équipe — elle vous répondra sous peu.",
+      "redirectFollowupDoneDM_en": "✅ Thanks! Your answers have been sent to the team.",
+      "redirectFollowupDoneDM_fr": "✅ Merci ! Vos réponses ont été transmises à l'équipe."
     }
   },
   "categories": [

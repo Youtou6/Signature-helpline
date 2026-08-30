@@ -35,6 +35,11 @@
           <span class="hint">Affiché à l'utilisateur quand le staff répond, et sur les embeds de ticket.</span>
           <input id="teamName" type="text" placeholder="Signature Support" />
         </label>
+        <label class="field">
+          <span>Rôle pingé pour chaque nouveau ticket</span>
+          <span class="hint">En plus des rôles spécifiques à la catégorie. Laisse sur "Aucun" pour ne pinguer que les rôles de la catégorie.</span>
+          <select id="pingRoleId"><option value="">Aucun</option></select>
+        </label>
         <button id="saveSettings" class="primary">Enregistrer</button>
         <span class="save-ok" id="settingsSaved" hidden>Enregistré.</span>
       </div>

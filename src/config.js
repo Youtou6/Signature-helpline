@@ -36,6 +36,12 @@ const DEFAULT_TEXTS = {
   ratingCommentPrompt_fr: 'Voulez-vous ajouter un commentaire ? (facultatif)',
   redirectNotice_en: '🔀 This ticket was redirected from **{from}** to **{to}** by {staff}.',
   redirectNotice_fr: '🔀 Ce ticket a été redirigé de **{from}** vers **{to}** par {staff}.',
+  redirectFollowupPromptDM_en: 'Your ticket has been redirected to a different team. A couple more questions to help them assist you:',
+  redirectFollowupPromptDM_fr: 'Votre ticket a été redirigé vers une autre équipe. Encore quelques questions pour mieux vous aider :',
+  redirectSimpleNoticeDM_en: 'Your ticket has been redirected to a different team — they will get back to you shortly.',
+  redirectSimpleNoticeDM_fr: 'Votre ticket a été redirigé vers une autre équipe — elle vous répondra sous peu.',
+  redirectFollowupDoneDM_en: '✅ Thanks! Your answers have been sent to the team.',
+  redirectFollowupDoneDM_fr: '✅ Merci ! Vos réponses ont été transmises à l\'équipe.',
 };
 
 function defaultConfig() {
@@ -44,6 +50,7 @@ function defaultConfig() {
       teamName: 'Signature Support',
       modmailCategoryId: '',
       logChannelId: '',
+      pingRoleId: '',
       autoClose: {
         enabled: true,
         inactivityHours: 24,
@@ -180,6 +187,8 @@ function migrate(cfg) {
   cfg.settings = cfg.settings || {};
   cfg.settings.autoClose = { enabled: true, inactivityHours: 24, graceMinutes: 60, ...(cfg.settings.autoClose || {}) };
   cfg.settings.texts = { ...DEFAULT_TEXTS, ...(cfg.settings.texts || {}) };
+  cfg.settings.pingRoleId = cfg.settings.pingRoleId || '';
+  cfg.settings.logChannelId = cfg.settings.logChannelId || '';
   cfg.categories = cfg.categories || [];
   return cfg;
 }

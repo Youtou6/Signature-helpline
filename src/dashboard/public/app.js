@@ -329,8 +329,22 @@
           <span>${entry.userTag} — ${entry.categoryLabelEn}</span>
           <span class="stars">${stars}</span>
         </div>
-        <div class="archive-row-meta">Fermé le ${date} par ${entry.closedBy || '—'} (${entry.language.toUpperCase()})</div>
+        <div class="archive-row-meta">
+          Fermé le ${date} par ${entry.closedBy || '—'} (${entry.language.toUpperCase()})
+          <button class="icon-btn delete-archive-btn" title="Supprimer cet avis / ce ticket">🗑️</button>
+        </div>
       `;
+      row.querySelector('.delete-archive-btn').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!confirm('Supprimer définitivement ce ticket archivé et son avis ?')) return;
+        await api(`/api/archive/${entry.id}`, { method: 'DELETE' });
+        row.remove();
+        const newStats = await api('/api/stats');
+        const blocks2 = statsRow.querySelectorAll('.stat-value');
+        if (blocks2[0]) blocks2[0].textContent = newStats.averageRating != null ? `${newStats.averageRating.toFixed(1)} ⭐` : '—';
+        if (blocks2[1]) blocks2[1].textContent = String(newStats.ratedCount);
+        if (blocks2[2]) blocks2[2].textContent = String(newStats.totalClosed);
+      });
       let expanded = false;
       row.addEventListener('click', async () => {
         expanded = !expanded;
@@ -345,11 +359,12 @@
         if (!full.transcript.length) {
           box.innerHTML = '<p class="hint">Aucun message échangé.</p>';
         } else {
+          const icons = { user: '👤', staff: '🛠️', note: '📝', system: 'ℹ️' };
           for (const m of full.transcript) {
             const line = document.createElement('div');
             line.className = `transcript-entry ${m.from}`;
             const time = new Date(m.at).toLocaleTimeString('fr-FR');
-            line.innerHTML = `<span class="who">${m.from === 'user' ? '👤' : m.from === 'note' ? '📝' : '🛠️'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>`;
+            line.innerHTML = `<span class="who">${icons[m.from] || '•'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>`;
             box.appendChild(line);
           }
         }
@@ -371,6 +386,14 @@
     [config, roles] = await Promise.all([api('/api/config'), api('/api/roles')]);
 
     document.getElementById('teamName').value = config.settings.teamName || '';
+    const pingSelect = document.getElementById('pingRoleId');
+    for (const role of roles) {
+      const opt = document.createElement('option');
+      opt.value = role.id;
+      opt.textContent = role.name;
+      pingSelect.appendChild(opt);
+    }
+    pingSelect.value = config.settings.pingRoleId || '';
     const autoClose = config.settings.autoClose || {};
     document.getElementById('autoCloseEnabled').checked = autoClose.enabled !== false;
     document.getElementById('inactivityHours').value = autoClose.inactivityHours ?? 24;
@@ -386,6 +409,7 @@
         method: 'PUT',
         body: JSON.stringify({
           teamName: document.getElementById('teamName').value,
+          pingRoleId: document.getElementById('pingRoleId').value,
           autoClose: {
             enabled: document.getElementById('autoCloseEnabled').checked,
             inactivityHours: document.getElementById('inactivityHours').value,

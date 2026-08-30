@@ -41,6 +41,14 @@ function setRating(id, patch) {
   return all[idx];
 }
 
+function deleteEntry(id) {
+  const all = readAll();
+  const next = all.filter((e) => e.id !== id);
+  const removed = next.length !== all.length;
+  if (removed) writeAll(next);
+  return removed;
+}
+
 function listSummaries(limit = 200) {
   return readAll()
     .slice(0, limit)
@@ -68,4 +76,4 @@ function getStats() {
   };
 }
 
-module.exports = { addEntry, getById, setRating, listSummaries, getStats, readAll };
+module.exports = { addEntry, getById, setRating, deleteEntry, listSummaries, getStats, readAll };

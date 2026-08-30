@@ -10,16 +10,26 @@ A custom Discord modmail bot for the **Signature** server.
 - The bot then creates a **private staff-only ticket channel** on the server, visible only to the roles
   you mapped to that category, and relays every DM ↔ channel message both ways.
 - **Redirect**: staff can move a ticket to a different category/team from a button on the ticket — access
-  updates immediately to the new category's roles.
+  updates immediately to the new category's roles, the ticket is **automatically unclaimed**, and the user
+  is prompted (in DM) to answer that new category's questionnaire if it has one.
+- **Claim / unclaim**: staff can claim a ticket from a button so everyone knows who's handling it; clicking
+  again unclaims it. Redirecting a ticket always unclaims it.
 - **Auto-close on inactivity**: if staff have replied at least once (staff can take as long as they want
   before that first reply) and the ticket then goes quiet for 24h (configurable), the user gets a DM
-  warning; if they still don't respond within 1h (configurable) the ticket closes automatically.
+  warning **and** a note is posted in the ticket channel so staff see it too; if they still don't respond
+  within 1h (configurable) the ticket closes automatically.
 - **Ratings**: right after a ticket closes, the user gets a DM asking them to rate the support 1–5 stars
   with an optional comment.
+- **Log channel**: a `#modmail-logs` channel is created automatically and gets a line for every ticket
+  opened, closed, redirected, claimed/unclaimed, and rated — so staff have a full history even after a
+  ticket channel is deleted.
+- **Staff ping**: every category can ping its own roles, plus you can set one extra role (e.g. "All Staff")
+  in the dashboard that gets pinged on *every* new ticket regardless of category.
 - Staff close the ticket with the **Close ticket** button or `/close`.
 - Everything below is managed visually from a built-in **web dashboard** (password protected): categories,
-  conditional questions, role mapping, all bot texts (EN/FR), auto-close timing, average rating, and the
-  full transcript of every closed ticket.
+  conditional questions, role mapping, all bot texts (EN/FR), auto-close timing, the staff-ping role,
+  average rating, and the full transcript of every closed ticket (with a delete button to remove test
+  entries).
 
 ## 1. Project layout
 
@@ -120,17 +130,20 @@ will reset** the next time you push to GitHub. Two options:
 
 Open `/dashboard`, log in, and use the four tabs:
 
-- **Paramètres** — support team name, and the auto-close timing (hours of inactivity before the warning
-  DM, minutes of grace period before the ticket actually closes).
+- **Paramètres** — support team name, the extra "ping all staff" role for new tickets, and the auto-close
+  timing (hours of inactivity before the warning, minutes of grace period before the ticket actually closes).
 - **Catégories** — for each category: emoji + English/French label, which roles can see its tickets, and
   its questions. A question is either a **text answer** or a **multiple choice** (which becomes a select
   menu). Any question can be set to "Afficher seulement si" (only show if) an *earlier* choice question in
   the same category was answered a specific way — this is what powers "Custom Services → which service? →
   a different follow-up question per answer". Questions are asked in the order they appear in the list.
 - **Textes** — every bilingual message the bot sends during the ticket flow (welcome message, ticket
-  created/closed DMs, inactivity warning, rating request, redirect notice, etc.), fully editable.
+  created/closed DMs, inactivity warning, rating request, redirect notice, redirect follow-up prompt, etc.),
+  fully editable.
 - **Avis & Transcripts** — average rating and total ratings at a glance, plus every closed ticket with its
-  full conversation transcript (click a row to expand it) and any comment left with the rating.
+  full conversation transcript (click a row to expand it — includes staff/user messages, internal notes,
+  *and* system events like "ticket opened", "redirected", "claimed"). Each row has a 🗑️ button to
+  permanently delete a test ticket/review.
 
 Click **+ Nouvelle catégorie** to add something like "Custom Services" from scratch — it appears in the
 Discord menu immediately (until the disk resets, see above).
@@ -140,10 +153,11 @@ Discord menu immediately (until the disk resets, see above).
 - `/close` — closes the current ticket channel (must be run inside a ticket channel).
 - `/ping` — quick check that the bot is online.
 
-Staff can also use the **Close ticket** and **Redirect** buttons posted automatically at the top of every
-ticket channel. Redirect lets staff move a ticket to a different category (e.g. a player opened "Other"
-but actually wants a custom order) — it re-assigns which roles can see the channel to match the new
-category, and posts a notice in the channel.
+Staff can also use the **Close ticket**, **Redirect**, and **Claim**/**Unclaim** buttons posted
+automatically at the top of every ticket channel. Redirect lets staff move a ticket to a different category
+(e.g. a player opened "Other" but actually wants a custom order) — it re-assigns which roles can see the
+channel to match the new category, unclaims the ticket, posts a notice in the channel, and DMs the user to
+answer the new category's questions if it has any (their answers get posted back into the same channel).
 
 ## 8. Notes on behavior
 
@@ -154,6 +168,13 @@ category, and posts a notice in the channel.
 - If the user's DMs are closed, staff get a warning in the ticket channel instead of a silent failure.
 - **Auto-close**: the bot checks every 5 minutes. A ticket is only eligible once staff have sent at least
   one message in it (so tickets waiting on a first reply are never auto-closed). Any new message from
-  either side resets the inactivity clock and cancels a pending warning.
+  either side resets the inactivity clock and cancels a pending warning. The warning DM to the user is
+  mirrored as a note in the ticket channel and in `#modmail-logs`.
 - **Ratings**: sent as a DM right after closing, with 1–5 star buttons and an optional comment via a small
   follow-up form. Entirely optional for the user — ignoring the message just leaves no rating.
+- **Claim**: any staff member who can see the ticket can claim it; if someone else already claimed it,
+  clicking Claim just tells you who has it rather than stealing it. Redirecting a ticket always clears the
+  claim, since it's likely going to a different team.
+- **`#modmail-logs`**: auto-created inside the "Modmail Tickets" category the first time it's needed. By
+  default only the bot (and the "ping all staff" role, if you set one) can see it — adjust its permissions
+  manually in Discord if you want more people to have access.
