@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const persistence = require('./persistence');
 
 const CONFIG_PATH = path.join(__dirname, '..', 'data', 'config.json');
 const MAX_QUESTIONS_PER_CATEGORY = 10;
@@ -51,6 +52,12 @@ function defaultConfig() {
       modmailCategoryId: '',
       logChannelId: '',
       pingRoleId: '',
+      presence: {
+        type: 'WATCHING', // PLAYING | LISTENING | WATCHING | COMPETING | STREAMING
+        text: 'for new tickets',
+        url: '',
+        status: 'online', // online | idle | dnd | invisible
+      },
       autoClose: {
         enabled: true,
         inactivityHours: 24,
@@ -189,6 +196,7 @@ function migrate(cfg) {
   cfg.settings.texts = { ...DEFAULT_TEXTS, ...(cfg.settings.texts || {}) };
   cfg.settings.pingRoleId = cfg.settings.pingRoleId || '';
   cfg.settings.logChannelId = cfg.settings.logChannelId || '';
+  cfg.settings.presence = { type: 'WATCHING', text: 'for new tickets', url: '', status: 'online', ...(cfg.settings.presence || {}) };
   cfg.categories = cfg.categories || [];
   return cfg;
 }
@@ -200,7 +208,9 @@ function getConfig() {
 }
 
 function saveConfig(cfg) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  const content = JSON.stringify(cfg, null, 2);
+  fs.writeFileSync(CONFIG_PATH, content);
+  persistence.scheduleSync(() => content);
   return cfg;
 }
 

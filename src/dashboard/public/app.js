@@ -394,6 +394,60 @@
       pingSelect.appendChild(opt);
     }
     pingSelect.value = config.settings.pingRoleId || '';
+
+    const presence = config.settings.presence || {};
+    document.getElementById('presenceType').value = presence.type || 'WATCHING';
+    document.getElementById('presenceStatus').value = presence.status || 'online';
+    document.getElementById('presenceText').value = presence.text || '';
+    document.getElementById('presenceUrl').value = presence.url || '';
+    const toggleStreamingUrl = () => {
+      document.getElementById('presenceUrlField').hidden = document.getElementById('presenceType').value !== 'STREAMING';
+    };
+    toggleStreamingUrl();
+    document.getElementById('presenceType').addEventListener('change', toggleStreamingUrl);
+    document.getElementById('savePresence').addEventListener('click', async () => {
+      await api('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          presence: {
+            type: document.getElementById('presenceType').value,
+            status: document.getElementById('presenceStatus').value,
+            text: document.getElementById('presenceText').value,
+            url: document.getElementById('presenceUrl').value,
+          },
+        }),
+      });
+      flashSaved(document.getElementById('presenceSaved'));
+    });
+
+    api('/api/backup-status').then((status) => {
+      if (status.githubSyncEnabled) {
+        document.getElementById('backupHint').textContent = '✅ Synchronisation automatique vers GitHub activée — tes changements sont sauvegardés en continu, même après un redéploiement.';
+      }
+    });
+    document.getElementById('exportConfigBtn').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = '/api/export';
+      a.download = 'signature-modmail-config.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+    document.getElementById('importConfigBtn').addEventListener('click', () => document.getElementById('importConfigFile').click());
+    document.getElementById('importConfigFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        if (!confirm('Cela va remplacer toute la configuration actuelle (catégories, textes, réglages). Continuer ?')) return;
+        await api('/api/import', { method: 'POST', body: JSON.stringify(parsed) });
+        alert('Configuration importée. La page va se recharger.');
+        location.reload();
+      } catch (err) {
+        alert('Fichier invalide : ' + err.message);
+      }
+    });
     const autoClose = config.settings.autoClose || {};
     document.getElementById('autoCloseEnabled').checked = autoClose.enabled !== false;
     document.getElementById('inactivityHours').value = autoClose.inactivityHours ?? 24;

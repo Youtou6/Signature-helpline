@@ -4,6 +4,12 @@
     "modmailCategoryId": "",
     "logChannelId": "",
     "pingRoleId": "",
+    "presence": {
+      "type": "WATCHING",
+      "text": "for new tickets",
+      "url": "",
+      "status": "online"
+    },
     "autoClose": {
       "enabled": true,
       "inactivityHours": 24,

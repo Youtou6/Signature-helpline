@@ -9,7 +9,17 @@ A custom Discord modmail bot for the **Signature** server.
   on the answer (logo → style question, website → page count, etc.) — all built visually, no code.
 - The bot then creates a **private staff-only ticket channel** on the server, visible only to the roles
   you mapped to that category, and relays every DM ↔ channel message both ways.
-- **Redirect**: staff can move a ticket to a different category/team from a button on the ticket — access
+- **Restart anytime**: at any point during the intake questions, the user can hit "🔄 Restart" (or just type
+  "restart"/"recommencer") to wipe whatever they'd filled in so far and start over from the language choice,
+  with a confirmation message.
+- **Survives restarts**: ticket state is saved to disk as the bot runs, and on top of that, every ticket
+  channel's topic secretly encodes the user/category/language — so if the bot restarts and its on-disk
+  memory is gone (e.g. a fresh Render deploy), it rebuilds its list of open tickets straight from the
+  existing Discord channels, including a best-effort replay of the conversation.
+- **Bot status**: set what the bot is shown as doing ("Watching for new tickets", "Listening to...", a
+  Twitch stream, etc.) and its online/idle/dnd status, right from the dashboard.
+- **Styled messages**: every DM the bot sends to a user (welcome, confirmations, reminders, rating request...)
+  is rendered as a polished "Signature"-branded container instead of plain text.
   updates immediately to the new category's roles, the ticket is **automatically unclaimed**, and the user
   is prompted (in DM) to answer that new category's questionnaire if it has one.
 - **Claim / unclaim**: staff can claim a ticket from a button so everyone knows who's handling it; clicking
@@ -117,21 +127,45 @@ Use a free uptime pinger such as [UptimeRobot](https://uptimerobot.com) to hit y
 ### About data persistence
 
 `data/config.json`, `data/tickets.json` and `data/archive.json` live on Render's local disk, which is
-**wiped on every new deploy** (and on free-plan sleep/wake cycles). `tickets.json` is fine to lose (open
-tickets are transient), but **your custom categories, edited texts, and the ratings/transcripts archive
-will reset** the next time you push to GitHub. Two options:
-- Fine for now: re-add any custom categories after a redeploy (rare once things are set up), and treat
-  the transcripts archive as "since the last deploy".
-- For real persistence: upgrade to a Render paid plan and attach a **Persistent Disk** mounted at
-  `/opt/render/project/src/data`, or swap `config.js`/`store.js`/`archive.js` for a small database (e.g. a
-  free MongoDB Atlas cluster). Happy to wire that up if you want it — just ask.
+**wiped on every new deploy** (and on free-plan sleep/wake cycles). `tickets.json` is fine to lose — the
+bot rebuilds open tickets straight from Discord on startup (see "Survives restarts" above). But your
+**categories, edited texts, settings, and the ratings/transcripts archive will reset** on redeploy unless
+you use one of these:
+
+**Option 1 — manual backup (works out of the box, no setup).** In the dashboard's Paramètres tab:
+- **📥 Exporter la config** downloads the current categories/texts/settings as a JSON file.
+- **📤 Importer une config** uploads one back and replaces the current configuration.
+
+Export before you `git push`, import right after the new deploy finishes. Takes 10 seconds, zero extra
+accounts. (Only backs up categories/texts/settings, not the ratings archive.)
+
+**Option 2 — automatic GitHub sync (optional, a few minutes to set up).** If you'd rather this happen on
+its own: every dashboard save can be auto-committed straight back to `data/config.json` in your GitHub
+repo, so the *next* deploy already starts from your latest edits.
+1. GitHub → your avatar → **Settings** → **Developer settings** → **Personal access tokens** →
+   **Fine-grained tokens** → generate one scoped to just this repo, with **Contents: Read and write**
+   permission.
+2. On Render, add two environment variables: `GITHUB_TOKEN` (the token) and `GITHUB_REPO`
+   (`your-username/your-repo-name`). Optionally `GITHUB_BRANCH` if you don't use `main`.
+3. That's it — no code change needed, this is already wired up and simply does nothing if those variables
+   aren't set.
+
+⚠️ If Render's "Auto-Deploy" is on, every commit the bot makes will also trigger a redeploy (a few seconds
+of downtime each time someone saves in the dashboard). If that's annoying, turn Auto-Deploy off on Render
+and use the **Manual Deploy** button whenever you actually push new code — your data stays current in
+GitHub either way.
+
+For the ratings/transcripts archive itself, there's no export yet; if you need that to survive deploys too,
+upgrading to a Render paid plan with a **Persistent Disk**, or swapping the `data/*.json` files for a small
+database (e.g. free MongoDB Atlas), are the two real options — happy to wire either up if you want it.
 
 ## 6. Managing everything from the dashboard
 
 Open `/dashboard`, log in, and use the four tabs:
 
-- **Paramètres** — support team name, the extra "ping all staff" role for new tickets, and the auto-close
-  timing (hours of inactivity before the warning, minutes of grace period before the ticket actually closes).
+- **Paramètres** — support team name, the extra "ping all staff" role for new tickets, the bot's Discord
+  status (activity type + text + online/idle/dnd), the auto-close timing, and the config export/import
+  buttons.
 - **Catégories** — for each category: emoji + English/French label, which roles can see its tickets, and
   its questions. A question is either a **text answer** or a **multiple choice** (which becomes a select
   menu). Any question can be set to "Afficher seulement si" (only show if) an *earlier* choice question in
@@ -175,6 +209,15 @@ answer the new category's questions if it has any (their answers get posted back
 - **Claim**: any staff member who can see the ticket can claim it; if someone else already claimed it,
   clicking Claim just tells you who has it rather than stealing it. Redirecting a ticket always clears the
   claim, since it's likely going to a different team.
+- **Restart**: while answering the intake questions (before the ticket is created), the user can tap
+  "🔄 Restart" on any step, or just type "restart" / "recommencer" / "annuler" / "cancel", to forget
+  everything they've entered so far and begin again from the language choice. This has no effect once a
+  ticket already exists — it only resets the pre-ticket questionnaire.
+- **Ticket recovery**: on startup, the bot cross-checks its saved ticket list against the actual channels
+  in the "Modmail Tickets" category. Channels that were deleted while it was offline get forgotten; ticket
+  channels it doesn't remember (e.g. after `tickets.json` was reset by a redeploy) get rebuilt from the
+  channel's topic and up to its last 100 messages, so replying, closing, and claiming keep working without
+  needing to recreate the ticket.
 - **`#modmail-logs`**: auto-created inside the "Modmail Tickets" category the first time it's needed. By
   default only the bot (and the "ping all staff" role, if you set one) can see it — adjust its permissions
   manually in Discord if you want more people to have access.

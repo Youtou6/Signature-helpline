@@ -2,6 +2,8 @@ const express = require('express');
 const path = require('path');
 const { getConfig, saveConfig, slugify, MAX_QUESTIONS_PER_CATEGORY } = require('../config');
 const archive = require('../archive');
+const persistence = require('../persistence');
+const { applyPresence } = require('../bot');
 
 function requireAuth(req, res, next) {
   if (req.session && req.session.loggedIn) return next();
@@ -80,6 +82,14 @@ module.exports = function dashboardRouter(client) {
     const cfg = getConfig();
     cfg.settings.teamName = req.body.teamName ?? cfg.settings.teamName;
     cfg.settings.pingRoleId = req.body.pingRoleId ?? cfg.settings.pingRoleId;
+    if (req.body.presence) {
+      cfg.settings.presence = {
+        type: ['PLAYING', 'LISTENING', 'WATCHING', 'COMPETING', 'STREAMING'].includes(req.body.presence.type) ? req.body.presence.type : 'WATCHING',
+        text: (req.body.presence.text || '').slice(0, 128),
+        url: req.body.presence.url || '',
+        status: ['online', 'idle', 'dnd', 'invisible'].includes(req.body.presence.status) ? req.body.presence.status : 'online',
+      };
+    }
     if (req.body.autoClose) {
       cfg.settings.autoClose = {
         enabled: req.body.autoClose.enabled !== false,
@@ -88,6 +98,7 @@ module.exports = function dashboardRouter(client) {
       };
     }
     saveConfig(cfg);
+    applyPresence(client);
     res.json(cfg.settings);
   });
 
@@ -165,6 +176,27 @@ module.exports = function dashboardRouter(client) {
   router.delete('/api/archive/:id', requireAuth, (req, res) => {
     const removed = archive.deleteEntry(req.params.id);
     if (!removed) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  });
+
+  // ---- Backup: manual export/import + optional GitHub auto-sync status ----
+
+  router.get('/api/backup-status', requireAuth, (req, res) => {
+    res.json({ githubSyncEnabled: persistence.isEnabled() });
+  });
+
+  router.get('/api/export', requireAuth, (req, res) => {
+    res.setHeader('Content-Disposition', 'attachment; filename="signature-modmail-config.json"');
+    res.json(getConfig());
+  });
+
+  router.post('/api/import', requireAuth, express.json({ limit: '2mb' }), (req, res) => {
+    const incoming = req.body;
+    if (!incoming || !incoming.settings || !Array.isArray(incoming.categories)) {
+      return res.status(400).json({ error: 'This does not look like a valid Signature config export.' });
+    }
+    saveConfig(incoming);
+    applyPresence(client);
     res.json({ ok: true });
   });
 
