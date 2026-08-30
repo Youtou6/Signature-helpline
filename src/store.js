@@ -43,6 +43,7 @@ function createTicket(userId, ticket) {
     ticketMessageId: null,
     claimedBy: null,
     claimedByTag: null,
+    answers: {},
     ...ticket,
   };
   writeAll(all);

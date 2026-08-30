@@ -9,11 +9,12 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  EmbedBuilder,
   PermissionFlagsBits,
   ChannelType,
   ContainerBuilder,
+  SectionBuilder,
   TextDisplayBuilder,
+  ThumbnailBuilder,
   SeparatorBuilder,
   SeparatorSpacingSize,
   MessageFlags,
@@ -32,7 +33,9 @@ const pendingFlows = new Map(); // userId -> { step, lang, categoryId, answers, 
 
 const GOLD = 0xc6a664;
 const AUTO_CLOSE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-const RESTART_KEYWORDS = ['restart', 'recommencer', 'annuler', 'cancel', 'reset', 'recommencé'];
+const RESTART_KEYWORDS = ['restart', 'recommencer', 'annuler', 'cancel', 'reset'];
+const MODMAIL_CATEGORY_NAME = 'Modmail Tickets';
+const LOG_CHANNEL_NAME = 'modmail-logs';
 
 function shortId() {
   return Date.now().toString(36).slice(-5);
@@ -50,7 +53,7 @@ function sanitizeChannelName(name) {
   );
 }
 
-// ---- "Signature" styled DM messages (Discord Components V2 containers) ----
+// ---- "Signature" styled messages — real Components V2 containers, no embeds anywhere ----
 
 function styledPayload(text, actionRows = []) {
   const container = new ContainerBuilder()
@@ -64,6 +67,15 @@ function styledPayload(text, actionRows = []) {
     .addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent('-# Signature · Modmail'));
   return { flags: MessageFlags.IsComponentsV2, components: [container] };
+}
+
+// Used for DM <-> channel relay messages: a small identity header (avatar + tag) plus the message body.
+function relayPayload(tag, avatarURL, content, files) {
+  const section = new SectionBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`**${tag}**`), new TextDisplayBuilder().setContent(content || '*(no text content)*'))
+    .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatarURL));
+  const container = new ContainerBuilder().setAccentColor(GOLD).addSectionComponents(section);
+  return { flags: MessageFlags.IsComponentsV2, components: [container], files: files || [] };
 }
 
 function buildLanguageRow() {
@@ -107,7 +119,10 @@ function resetFlowMessage(lang) {
   return styledPayload(`${resetLine}\n\n${t(cfg, 'en', 'welcome')}`, [buildLanguageRow()]);
 }
 
-// ---- Permissions / channel helpers ----
+// ---- Permissions / channel discovery helpers ----
+// These always try to find an EXISTING "Modmail Tickets" category / log channel by
+// name before creating a new one, so a reset config.json (e.g. after a redeploy)
+// never causes duplicate categories to pile up on the Discord side.
 
 function buildOverwrites(guild, client, category) {
   const overwrites = [
@@ -131,13 +146,27 @@ function buildOverwrites(guild, client, category) {
   return overwrites;
 }
 
-async function ensureModmailCategory(guild) {
+async function findModmailCategory(guild) {
   const cfg = getConfig();
   if (cfg.settings.modmailCategoryId) {
     const existing = guild.channels.cache.get(cfg.settings.modmailCategoryId);
-    if (existing) return existing.id;
+    if (existing) return existing;
   }
-  const created = await guild.channels.create({ name: 'Modmail Tickets', type: ChannelType.GuildCategory });
+  await guild.channels.fetch();
+  const byName = guild.channels.cache.find((ch) => ch.type === ChannelType.GuildCategory && ch.name === MODMAIL_CATEGORY_NAME);
+  if (byName) {
+    cfg.settings.modmailCategoryId = byName.id;
+    saveConfig(cfg);
+    return byName;
+  }
+  return null;
+}
+
+async function ensureModmailCategory(guild) {
+  const found = await findModmailCategory(guild);
+  if (found) return found.id;
+  const created = await guild.channels.create({ name: MODMAIL_CATEGORY_NAME, type: ChannelType.GuildCategory });
+  const cfg = getConfig();
   cfg.settings.modmailCategoryId = created.id;
   saveConfig(cfg);
   return created.id;
@@ -150,13 +179,19 @@ async function ensureLogChannel(guild, client) {
     if (existing) return existing;
   }
   const parentId = await ensureModmailCategory(guild);
+  const byName = guild.channels.cache.find((ch) => ch.type === ChannelType.GuildText && ch.name === LOG_CHANNEL_NAME && ch.parentId === parentId);
+  if (byName) {
+    cfg.settings.logChannelId = byName.id;
+    saveConfig(cfg);
+    return byName;
+  }
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
   ];
   if (cfg.settings.pingRoleId) overwrites.push({ id: cfg.settings.pingRoleId, allow: [PermissionFlagsBits.ViewChannel] });
   const created = await guild.channels.create({
-    name: 'modmail-logs',
+    name: LOG_CHANNEL_NAME,
     type: ChannelType.GuildText,
     parent: parentId,
     permissionOverwrites: overwrites,
@@ -193,23 +228,23 @@ function summarizeAnswers(category, lang, answers) {
   return lines.join('\n');
 }
 
-function buildTicketEmbed(cfg, user, category, lang, answers) {
+// ---- The ticket "card" — a real Components V2 container, rebuilt from scratch
+// (category/claim/answers) every time something changes, so it's always accurate. ----
+
+function buildTicketContainer(cfg, user, category, lang, answers, claimedBy) {
   const langLabel = lang === 'fr' ? 'Français 🇫🇷' : 'English 🇬🇧';
   const catLabel = lang === 'fr' ? category.label_fr : category.label_en;
-  const embed = new EmbedBuilder()
-    .setColor(GOLD)
-    .setTitle(t(cfg, lang, 'newTicketChannelIntro'))
-    .setThumbnail(user.displayAvatarURL())
-    .addFields(
-      { name: 'User', value: `${user.tag} (\`${user.id}\`)`, inline: false },
-      { name: 'Language', value: langLabel, inline: true },
-      { name: 'Category', value: catLabel, inline: true },
-    )
-    .setFooter({ text: cfg.settings.teamName })
-    .setTimestamp();
 
-  for (const [key, value] of Object.entries(answers)) {
-    if (value === null || value === undefined) continue; // skipped (not applicable) question
+  const header = new SectionBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${t(cfg, lang, 'newTicketChannelIntro')}`))
+    .setThumbnailAccessory(new ThumbnailBuilder().setURL(user.displayAvatarURL()));
+
+  let meta = `**User:** ${user.tag} (\`${user.id}\`)\n**Language:** ${langLabel}\n**Category:** ${catLabel}`;
+  if (claimedBy) meta += `\n**Claimed by:** <@${claimedBy}>`;
+
+  const qaBlocks = [];
+  for (const [key, value] of Object.entries(answers || {})) {
+    if (value === null || value === undefined) continue;
     const q = (category.questions || []).find((qq) => qq.id === key);
     if (!q) continue;
     let displayValue = value;
@@ -217,10 +252,28 @@ function buildTicketEmbed(cfg, user, category, lang, answers) {
       const opt = (q.options || []).find((o) => o.id === value);
       displayValue = opt ? (lang === 'fr' ? opt.label_fr : opt.label_en) : value;
     }
-    const label = q ? (lang === 'fr' ? q.label_fr : q.label_en) : key;
-    embed.addFields({ name: String(label).slice(0, 256), value: String(displayValue || '—').slice(0, 1024) });
+    const label = lang === 'fr' ? q.label_fr : q.label_en;
+    qaBlocks.push(`**${label}**\n${String(displayValue || '—').slice(0, 900)}`);
   }
-  return embed;
+
+  const container = new ContainerBuilder()
+    .setAccentColor(GOLD)
+    .addSectionComponents(header)
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(meta));
+
+  if (qaBlocks.length) {
+    container
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(qaBlocks.join('\n\n').slice(0, 3900)));
+  }
+
+  container
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addActionRowComponents(buildTicketActionRow(user.id, !!claimedBy))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${cfg.settings.teamName}`));
+
+  return container;
 }
 
 function buildTicketActionRow(userId, claimed) {
@@ -239,29 +292,21 @@ async function refreshTicketMessage(client, guild, userId, ticket) {
   const channel = guild.channels.cache.get(ticket.channelId);
   if (!channel || !ticket.ticketMessageId) return;
   const category = getCategory(ticket.categoryId);
+  if (!category) return;
+  const user = await client.users.fetch(userId).catch(() => null);
+  if (!user) return;
+  const cfg = getConfig();
+  const container = buildTicketContainer(cfg, user, category, ticket.language || 'en', ticket.answers || {}, ticket.claimedBy);
   const msg = await channel.messages.fetch(ticket.ticketMessageId).catch(() => null);
-  if (!msg || !msg.embeds[0]) return;
-
-  const fields = msg.embeds[0].fields.map((f) => ({ ...f }));
-  const catIdx = fields.findIndex((f) => f.name === 'Category');
-  if (catIdx !== -1 && category) fields[catIdx].value = category.label_en;
-  const claimIdx = fields.findIndex((f) => f.name === 'Claimed by');
-  if (ticket.claimedBy) {
-    const claimField = { name: 'Claimed by', value: `<@${ticket.claimedBy}>`, inline: true };
-    if (claimIdx !== -1) fields[claimIdx] = claimField;
-    else fields.push(claimField);
-  } else if (claimIdx !== -1) {
-    fields.splice(claimIdx, 1);
-  }
-  const embed = EmbedBuilder.from(msg.embeds[0]).setFields(fields);
-  await msg.edit({ embeds: [embed], components: [buildTicketActionRow(userId, !!ticket.claimedBy)] }).catch(() => {});
+  if (!msg) return;
+  await msg.edit({ flags: MessageFlags.IsComponentsV2, components: [container] }).catch(() => {});
 }
 
 // The channel topic doubles as durable storage for user/category/language,
 // so the bot can rebuild its ticket list from Discord itself after a restart
 // even if data/tickets.json was reset (e.g. a fresh Render deploy).
-function buildTicketTopic(user, category, lang) {
-  return `Signature Modmail | user:${user.id} | category:${category.id} | lang:${lang}`;
+function buildTicketTopic(userId, category, lang) {
+  return `Signature Modmail | user:${userId} | category:${category.id} | lang:${lang}`;
 }
 
 function parseTicketTopic(topic) {
@@ -282,15 +327,16 @@ async function createTicketChannel(client, guild, user, category, lang, answers)
     type: ChannelType.GuildText,
     parent: parentId,
     permissionOverwrites: buildOverwrites(guild, client, category),
-    topic: buildTicketTopic(user, category, lang),
+    topic: buildTicketTopic(user.id, category, lang),
   });
 
-  const embed = buildTicketEmbed(cfg, user, category, lang, answers);
   const pingParts = [...(category.roleIds || [])];
   if (cfg.settings.pingRoleId && !pingParts.includes(cfg.settings.pingRoleId)) pingParts.push(cfg.settings.pingRoleId);
-  const pingContent = pingParts.length ? pingParts.map((r) => `<@&${r}>`).join(' ') : undefined;
+  const topComponents = [];
+  if (pingParts.length) topComponents.push(new TextDisplayBuilder().setContent(pingParts.map((r) => `<@&${r}>`).join(' ')));
+  topComponents.push(buildTicketContainer(cfg, user, category, lang, answers, null));
 
-  const sentMessage = await channel.send({ content: pingContent, embeds: [embed], components: [buildTicketActionRow(user.id, false)] });
+  const sentMessage = await channel.send({ flags: MessageFlags.IsComponentsV2, components: topComponents });
 
   store.createTicket(user.id, {
     channelId: channel.id,
@@ -299,6 +345,7 @@ async function createTicketChannel(client, guild, user, category, lang, answers)
     language: lang,
     openedAt: Date.now(),
     ticketMessageId: sentMessage.id,
+    answers: answers || {},
   });
 
   store.appendTranscript(user.id, {
@@ -330,16 +377,19 @@ async function finalizeTicket(interaction, mode, categoryId, lang, answers, redi
 
   if (redirectChannelId) {
     const channel = guild.channels.cache.get(redirectChannelId);
-    if (channel) {
-      const embed = buildTicketEmbed(cfg, interaction.user, category, lang, answers).setTitle(
-        lang === 'fr' ? 'Réponses au nouveau questionnaire' : 'New questionnaire answers',
-      );
-      await channel.send({ embeds: [embed] }).catch(() => {});
+    const ticket = store.getTicketByUser(interaction.user.id);
+    if (channel && ticket) {
       store.appendTranscript(interaction.user.id, {
         from: 'system',
         authorTag: 'System',
         content: `Redirect questionnaire answered:\n${summarizeAnswers(category, lang, answers)}`,
       });
+      store.updateTicket(interaction.user.id, { answers: { ...(ticket.answers || {}), ...answers } });
+      const updatedTicket = store.getTicketByUser(interaction.user.id);
+      await refreshTicketMessage(interaction.client, guild, interaction.user.id, updatedTicket);
+      await channel
+        .send(styledPayload(lang === 'fr' ? '📋 Nouvelles réponses reçues — voir le ticket ci-dessus.' : '📋 New questionnaire answers received — see the ticket above.'))
+        .catch(() => {});
     }
     pendingFlows.delete(interaction.user.id);
     await interaction.editReply(styledPayload(t(cfg, lang, 'redirectFollowupDoneDM')));
@@ -442,16 +492,11 @@ async function handleDM(client, message) {
       return handleNewDM(message);
     }
     const files = [...message.attachments.values()].map((a) => ({ attachment: a.url, name: a.name }));
-    const embed = new EmbedBuilder()
-      .setColor(GOLD)
-      .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
-      .setDescription(message.content || '*(no text content)*')
-      .setTimestamp();
 
     store.appendTranscript(userId, { from: 'user', authorTag: message.author.tag, content: message.content, attachments: files.map((f) => f.attachment) });
     store.updateTicket(userId, { lastActivityAt: Date.now(), warningSentAt: null });
 
-    await channel.send({ embeds: [embed], files }).catch(() => {});
+    await channel.send(relayPayload(message.author.tag, message.author.displayAvatarURL(), message.content, files)).catch(() => {});
     await message.react('✅').catch(() => {});
     return;
   }
@@ -486,14 +531,8 @@ async function handleGuildMessage(message) {
   if (!user) return;
 
   const cfg = getConfig();
-  const embed = new EmbedBuilder()
-    .setColor(GOLD)
-    .setAuthor({ name: `${cfg.settings.teamName} — ${message.author.tag}`, iconURL: message.author.displayAvatarURL() })
-    .setDescription(message.content || '*(no text content)*')
-    .setTimestamp();
   const files = attachments.map((url) => ({ attachment: url }));
-
-  await user.send({ embeds: [embed], files }).catch(async () => {
+  await user.send(relayPayload(`${cfg.settings.teamName} — ${message.author.tag}`, message.author.displayAvatarURL(), message.content, files)).catch(async () => {
     await message.channel.send('⚠️ Could not deliver this message — the user may have DMs closed.').catch(() => {});
   });
 }
@@ -608,28 +647,40 @@ function startAutoCloseScheduler(client) {
 
 // ---- Recovering ticket state after a restart ----
 
+// Best-effort: walk a fetched message's raw V2 component tree and collect every
+// text-display string it contains, in order (used to reconstruct old messages).
+function extractContainerTexts(message) {
+  const texts = [];
+  function walk(node) {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node === 'object') {
+      if (typeof node.content === 'string') texts.push(node.content);
+      if (node.components) walk(node.components);
+    }
+  }
+  walk(message.components);
+  return texts;
+}
+
 async function reconcileTickets(client) {
   try {
     const guild = client.guilds.cache.get(process.env.GUILD_ID);
     if (!guild) return;
-    await guild.channels.fetch(); // make sure the cache is fresh right after startup
 
+    const category = await findModmailCategory(guild);
+    if (!category) return; // nothing created yet, nothing to recover
     const cfg = getConfig();
-    const categoryId = cfg.settings.modmailCategoryId;
-    if (!categoryId || !guild.channels.cache.has(categoryId)) return;
 
     const ticketChannels = guild.channels.cache.filter(
-      (ch) => ch.parentId === categoryId && ch.type === ChannelType.GuildText && ch.id !== cfg.settings.logChannelId,
+      (ch) => ch.parentId === category.id && ch.type === ChannelType.GuildText && ch.id !== cfg.settings.logChannelId,
     );
 
     const known = store.readAll();
-
-    // 1) Forget tickets whose channel was deleted while the bot was offline.
     for (const [userId, ticket] of Object.entries(known)) {
-      if (!guild.channels.cache.has(ticket.channelId)) store.deleteTicketByUser(userId);
+      if (!guild.channels.cache.has(ticket.channelId)) store.deleteTicketByUser(userId); // channel deleted while offline
     }
 
-    // 2) Rebuild records for real ticket channels the bot no longer remembers.
     const stillKnown = store.readAll();
     const knownChannelIds = new Set(Object.values(stillKnown).map((tk) => tk.channelId));
     let recovered = 0;
@@ -638,21 +689,26 @@ async function reconcileTickets(client) {
       if (knownChannelIds.has(channel.id)) continue;
       const parsed = parseTicketTopic(channel.topic || '');
       if (!parsed) continue;
-      const category = getCategory(parsed.categoryId) || cfg.categories[0];
-      if (!category) continue;
+      const ticketCategory = getCategory(parsed.categoryId) || cfg.categories[0];
+      if (!ticketCategory) continue;
 
       const transcript = [];
       let lastActivityAt = channel.createdTimestamp;
       let ticketMessageId = null;
+
       try {
         const messages = await channel.messages.fetch({ limit: 100 });
         const sorted = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
         for (const m of sorted) {
           lastActivityAt = m.createdTimestamp;
           if (m.author.bot) {
-            if (!ticketMessageId && m.embeds[0] && m.embeds[0].title) ticketMessageId = m.id; // the original ticket-info embed
-            if (m.embeds[0] && m.embeds[0].author) {
-              transcript.push({ at: m.createdTimestamp, from: 'user', authorTag: m.embeds[0].author.name, content: m.embeds[0].description || '' });
+            const texts = extractContainerTexts(m);
+            if (!ticketMessageId && texts.some((tx) => tx.startsWith('## '))) ticketMessageId = m.id; // the ticket card itself
+            const tagMatch = texts[0] && texts[0].match(/^\*\*(.+?)\*\*$/);
+            if (tagMatch) {
+              transcript.push({ at: m.createdTimestamp, from: 'user', authorTag: tagMatch[1], content: texts.slice(1).join('\n') });
+            } else if (texts.length) {
+              transcript.push({ at: m.createdTimestamp, from: 'system', authorTag: 'System', content: texts.join('\n').slice(0, 1800) });
             }
             continue;
           }
@@ -669,7 +725,7 @@ async function reconcileTickets(client) {
       store.createTicket(parsed.userId, {
         channelId: channel.id,
         guildId: guild.id,
-        categoryId: category.id,
+        categoryId: ticketCategory.id,
         language: parsed.lang || 'en',
         openedAt: channel.createdTimestamp,
         ticketMessageId,
@@ -679,6 +735,7 @@ async function reconcileTickets(client) {
         lastActivityAt,
         warningSentAt: null,
         transcript,
+        answers: {}, // original Q&A values aren't recoverable from the container text alone
       });
       recovered++;
     }
@@ -879,17 +936,16 @@ function createBotClient() {
         store.updateTicket(userId, nowClaiming ? { claimedBy: interaction.user.id, claimedByTag: interaction.user.tag } : { claimedBy: null, claimedByTag: null });
         store.appendTranscript(userId, { from: 'system', authorTag: 'System', content: nowClaiming ? `Claimed by ${interaction.user.tag}` : `Unclaimed by ${interaction.user.tag}` });
 
-        const fields = (interaction.message.embeds[0]?.fields || []).map((f) => ({ ...f }));
-        const claimIdx = fields.findIndex((f) => f.name === 'Claimed by');
-        if (nowClaiming) {
-          const claimField = { name: 'Claimed by', value: `<@${interaction.user.id}>`, inline: true };
-          if (claimIdx !== -1) fields[claimIdx] = claimField;
-          else fields.push(claimField);
-        } else if (claimIdx !== -1) {
-          fields.splice(claimIdx, 1);
+        const updatedTicket = store.getTicketByUser(userId);
+        const category = getCategory(updatedTicket.categoryId);
+        const user = await interaction.client.users.fetch(userId).catch(() => null);
+        if (category && user) {
+          const cfg = getConfig();
+          const container = buildTicketContainer(cfg, user, category, updatedTicket.language || 'en', updatedTicket.answers || {}, updatedTicket.claimedBy);
+          await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container] });
+        } else {
+          await interaction.deferUpdate();
         }
-        const embed = EmbedBuilder.from(interaction.message.embeds[0]).setFields(fields);
-        await interaction.update({ embeds: [embed], components: [buildTicketActionRow(userId, nowClaiming)] });
         if (interaction.guild) {
           await logEvent(interaction.guild, interaction.client, `${nowClaiming ? '🙋 **Claimed**' : '↩️ **Unclaimed**'} by ${interaction.user.tag} — <#${ticket.channelId}>`);
         }
@@ -935,7 +991,7 @@ function createBotClient() {
 
         if (channel) {
           await channel.permissionOverwrites.set(buildOverwrites(interaction.guild, interaction.client, newCategory));
-          await channel.setTopic(buildTicketTopic({ id: userId }, newCategory, ticket.language || 'en')).catch(() => {});
+          await channel.setTopic(buildTicketTopic(userId, newCategory, ticket.language || 'en')).catch(() => {});
           const notice = fill(t(cfg, ticket.language || 'en', 'redirectNotice'), {
             from: oldCategory ? oldCategory.label_en : ticket.categoryId,
             to: newCategory.label_en,
@@ -966,6 +1022,7 @@ function createBotClient() {
         const [, , archiveId, starsStr] = interaction.customId.split(':');
         const stars = parseInt(starsStr, 10);
         archive.setRating(archiveId, { stars, ratedAt: Date.now() });
+        archive.appendTranscriptEntry(archiveId, { from: 'system', authorTag: 'System', content: `User rated the support ${stars}/5.` });
         const entry = archive.getById(archiveId);
         const lang = entry ? entry.language : 'en';
         const cfg = getConfig();
@@ -1000,6 +1057,7 @@ function createBotClient() {
         const archiveId = interaction.customId.split(':')[2];
         const comment = interaction.fields.getTextInputValue('comment');
         archive.setRating(archiveId, { comment });
+        if (comment) archive.appendTranscriptEntry(archiveId, { from: 'system', authorTag: 'System', content: `User comment: ${comment}` });
         const entry = archive.getById(archiveId);
         const lang = entry ? entry.language : 'en';
         const cfg = getConfig();

@@ -364,7 +364,10 @@
             const line = document.createElement('div');
             line.className = `transcript-entry ${m.from}`;
             const time = new Date(m.at).toLocaleTimeString('fr-FR');
-            line.innerHTML = `<span class="who">${icons[m.from] || '•'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>`;
+            const attachmentsHtml = (m.attachments || [])
+              .map((url, i) => `<a href="${url}" target="_blank" rel="noopener">📎 pièce jointe ${i + 1}</a>`)
+              .join(' ');
+            line.innerHTML = `<span class="who">${icons[m.from] || '•'} ${m.authorTag}</span><span class="hint">${time}</span><div>${(m.content || '').replace(/</g, '&lt;')}</div>${attachmentsHtml ? `<div class="transcript-attachments">${attachmentsHtml}</div>` : ''}`;
             box.appendChild(line);
           }
         }

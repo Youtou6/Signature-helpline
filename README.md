@@ -18,8 +18,14 @@ A custom Discord modmail bot for the **Signature** server.
   existing Discord channels, including a best-effort replay of the conversation.
 - **Bot status**: set what the bot is shown as doing ("Watching for new tickets", "Listening to...", a
   Twitch stream, etc.) and its online/idle/dnd status, right from the dashboard.
-- **Styled messages**: every DM the bot sends to a user (welcome, confirmations, reminders, rating request...)
-  is rendered as a polished "Signature"-branded container instead of plain text.
+- **Styled messages**: every message the bot sends — the ticket card, DM confirmations, relayed messages
+  between staff and user — is a real Discord **container** (Components V2), not a classic embed.
+- **Rich transcripts**: the archived transcript for each closed ticket includes every real message
+  (with attachments), internal notes, and system events (opened, redirected, claimed, closed, rated,
+  commented) — the full staff-side history, not a summary.
+- **No duplicate categories**: the bot always looks for an existing "Modmail Tickets" Discord category (and
+  `#modmail-logs` channel) by name before creating a new one, so even if `data/config.json` gets reset it
+  reuses what's already there instead of creating a second one.
   updates immediately to the new category's roles, the ticket is **automatically unclaimed**, and the user
   is prompted (in DM) to answer that new category's questionnaire if it has one.
 - **Claim / unclaim**: staff can claim a ticket from a button so everyone knows who's handling it; clicking

@@ -49,6 +49,16 @@ function deleteEntry(id) {
   return removed;
 }
 
+function appendTranscriptEntry(id, entry) {
+  const all = readAll();
+  const idx = all.findIndex((e) => e.id === id);
+  if (idx === -1) return null;
+  all[idx].transcript = all[idx].transcript || [];
+  all[idx].transcript.push({ at: Date.now(), ...entry });
+  writeAll(all);
+  return all[idx];
+}
+
 function listSummaries(limit = 200) {
   return readAll()
     .slice(0, limit)
@@ -76,4 +86,4 @@ function getStats() {
   };
 }
 
-module.exports = { addEntry, getById, setRating, deleteEntry, listSummaries, getStats, readAll };
+module.exports = { addEntry, getById, setRating, deleteEntry, appendTranscriptEntry, listSummaries, getStats, readAll };

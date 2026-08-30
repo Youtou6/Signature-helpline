@@ -353,5 +353,8 @@ button.danger:hover { background: var(--danger-dim); color: var(--ink); }
 .transcript-entry.note .who { color: var(--danger); }
 .transcript-entry.system .who { color: var(--ink-dim); }
 .transcript-entry.system { font-style: italic; color: var(--ink-dim); }
+.transcript-attachments { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+.transcript-attachments a { color: var(--gold); font-size: 12px; text-decoration: none; }
+.transcript-attachments a:hover { text-decoration: underline; }
 .transcript-comment { font-style: italic; color: var(--ink-dim); margin-top: 6px; font-size: 12px; }
 
