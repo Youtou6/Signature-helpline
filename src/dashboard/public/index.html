@@ -126,6 +126,19 @@
           <button id="addCategoryBtn" class="primary">+ Nouvelle catégorie</button>
         </div>
         <p class="hint">Chaque catégorie est une option de support proposée à l'utilisateur. Assignez des rôles pour que seul le bon staff voie ces tickets. Les questions sont posées dans l'ordre ci-dessous ; une question peut être conditionnée à la réponse d'une question à choix précédente (ex : "Service custom" → "Quel service ?" → questions différentes selon la réponse).</p>
+        <p class="hint" id="aiStatusHint"></p>
+        <div class="field-row" id="aiAdvancedSettings">
+          <label class="field">
+            <span>Modèle Gemini</span>
+            <input id="aiModel" type="text" placeholder="gemini-2.5-flash" />
+          </label>
+          <label class="field">
+            <span>Échanges max avant escalade auto</span>
+            <input id="aiMaxTurns" type="number" min="1" max="30" />
+          </label>
+        </div>
+        <button id="saveAiSettings" class="ghost">Enregistrer les réglages IA</button>
+        <span class="save-ok" id="aiSettingsSaved" hidden>Enregistré.</span>
         <div class="hairline"></div>
         <div id="categoryList" class="category-list"></div>
       </div>
@@ -200,6 +213,15 @@
       <div class="field">
         <span>Rôles qui peuvent voir ces tickets</span>
         <div class="roles-picker"></div>
+      </div>
+
+      <div class="field ai-field">
+        <label class="field inline">
+          <input type="checkbox" class="ai-enabled-input" />
+          <span>🤖 Activer L'IA Signature sur cette catégorie</span>
+        </label>
+        <span class="hint">Quand un ticket de cette catégorie est créé, l'IA se présente et échange avec l'utilisateur avant que le staff n'intervienne (ou n'intervienne pas si elle résout le problème).</span>
+        <textarea class="ai-knowledge-input" placeholder="Ce que l'IA doit savoir pour cette catégorie : causes fréquentes, solutions, choses à vérifier en premier...&#10;Ex : Si un produit ne marche pas, la cause n°1 est que les HTTP Requests ne sont pas activées dans les paramètres du jeu, et que ça n'a pas été testé en dehors de Studio."></textarea>
       </div>
 
       <div class="field">

@@ -4,6 +4,7 @@ const { getConfig, saveConfig, slugify, MAX_QUESTIONS_PER_CATEGORY } = require('
 const archive = require('../archive');
 const store = require('../store');
 const bans = require('../bans');
+const ai = require('../ai');
 const persistence = require('../persistence');
 const { applyPresence } = require('../bot');
 
@@ -85,6 +86,12 @@ module.exports = function dashboardRouter(client) {
     cfg.settings.teamName = req.body.teamName ?? cfg.settings.teamName;
     cfg.settings.pingRoleId = req.body.pingRoleId ?? cfg.settings.pingRoleId;
     cfg.settings.anonymousReplies = req.body.anonymousReplies ?? cfg.settings.anonymousReplies;
+    if (req.body.ai) {
+      cfg.settings.ai = {
+        model: req.body.ai.model || cfg.settings.ai.model || 'gemini-2.5-flash',
+        maxTurns: Number(req.body.ai.maxTurns) || 6,
+      };
+    }
     if (req.body.presence) {
       cfg.settings.presence = {
         type: ['PLAYING', 'LISTENING', 'WATCHING', 'COMPETING', 'STREAMING'].includes(req.body.presence.type) ? req.body.presence.type : 'WATCHING',
@@ -127,6 +134,8 @@ module.exports = function dashboardRouter(client) {
       label_en: req.body.label_en || 'New Category',
       label_fr: req.body.label_fr || 'Nouvelle catégorie',
       roleIds: Array.isArray(req.body.roleIds) ? req.body.roleIds : [],
+      aiEnabled: !!req.body.aiEnabled,
+      aiKnowledge: (req.body.aiKnowledge || '').slice(0, 6000),
       questions: sanitizeQuestions(req.body.questions).length
         ? sanitizeQuestions(req.body.questions)
         : [{ id: 'reason', type: 'text', label_en: 'What is the reason for your ticket?', label_fr: 'Quelle est la raison de votre ticket ?', style: 'paragraph', required: true, showIf: null }],
@@ -147,6 +156,8 @@ module.exports = function dashboardRouter(client) {
       label_en: req.body.label_en ?? existing.label_en,
       label_fr: req.body.label_fr ?? existing.label_fr,
       roleIds: Array.isArray(req.body.roleIds) ? req.body.roleIds : existing.roleIds,
+      aiEnabled: req.body.aiEnabled !== undefined ? !!req.body.aiEnabled : existing.aiEnabled,
+      aiKnowledge: req.body.aiKnowledge !== undefined ? String(req.body.aiKnowledge).slice(0, 6000) : existing.aiKnowledge,
       questions: Array.isArray(req.body.questions) ? sanitizeQuestions(req.body.questions) : existing.questions,
     };
     saveConfig(cfg);
@@ -186,6 +197,10 @@ module.exports = function dashboardRouter(client) {
 
   router.get('/api/backup-status', requireAuth, (req, res) => {
     res.json({ githubSyncEnabled: persistence.isEnabled() });
+  });
+
+  router.get('/api/ai-status', requireAuth, (req, res) => {
+    res.json({ enabled: ai.isEnabled() });
   });
 
   router.get('/api/export', requireAuth, (req, res) => {

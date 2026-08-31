@@ -5,6 +5,10 @@
     "logChannelId": "",
     "pingRoleId": "",
     "anonymousReplies": false,
+    "ai": {
+      "model": "gemini-2.5-flash",
+      "maxTurns": 6
+    },
     "presence": {
       "type": "WATCHING",
       "text": "for new tickets",

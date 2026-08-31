@@ -44,6 +44,9 @@ function createTicket(userId, ticket) {
     claimedBy: null,
     claimedByTag: null,
     answers: {},
+    aiActive: false,
+    aiHistory: [],
+    aiTurns: 0,
     ...ticket,
   };
   writeAll(all);

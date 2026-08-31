@@ -27,6 +27,10 @@ A custom Discord modmail bot for the **Signature** server.
   directly from the dashboard, not just via the `!note` chat prefix.
 - **Anonymous mode**: an optional setting so users only ever see "Signature Support", never the individual
   staff member's tag, when someone replies.
+- **L'IA Signature (optional)**: enable an AI first-line assistant on specific categories. When a ticket in
+  that category is created, it introduces itself, reads the user's intake answers, and has a real
+  conversation with them — grounded in whatever you teach it per category — before handing off to staff if
+  needed. Free to run (Google Gemini's free tier). See "Enabling L'IA Signature" below.
 - **Text transcript in the logs**: on top of the dashboard archive, closing a ticket also drops a full
   `.txt` transcript as a file attachment in `#modmail-logs`.
 - **Styled messages, no accent bar**: every message the bot sends — the ticket card, DM confirmations,
@@ -69,6 +73,8 @@ src/
   config.js           Reads/writes data/config.json (categories, questions, roles, texts, settings)
   store.js            Reads/writes data/tickets.json (open tickets: transcript, activity, staff flag)
   archive.js          Reads/writes data/archive.json (closed tickets: full transcript + rating)
+  bans.js             Reads/writes data/bans.json (banned user IDs)
+  ai.js               "L'IA Signature" - optional Gemini-powered first-line assistant
   i18n.js             Reads the dashboard-editable EN/FR texts, with built-in fallbacks
   deploy-commands.js  One-off script to register the /close and /ping slash commands
   dashboard/
@@ -177,7 +183,43 @@ For the ratings/transcripts archive itself, there's no export yet; if you need t
 upgrading to a Render paid plan with a **Persistent Disk**, or swapping the `data/*.json` files for a small
 database (e.g. free MongoDB Atlas), are the two real options — happy to wire either up if you want it.
 
-## 6. Managing everything from the dashboard
+## 6. Enabling L'IA Signature (Gemini)
+
+This is entirely optional. Without a `GEMINI_API_KEY`, the bot behaves exactly as before — every ticket
+goes straight to staff.
+
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sign in with a Google account,
+   and click **Create API key**. No credit card needed for the free tier.
+2. On Render, add an environment variable `GEMINI_API_KEY` with that key. Redeploy.
+3. In the dashboard's **Catégories** tab, you'll see a note confirming the key was detected. For any
+   category, tick **🤖 Activer L'IA Signature sur cette catégorie**, and fill in the **"Ce que l'IA doit
+   savoir"** box with whatever's specific to that category — known causes, fixes, things to check first,
+   in plain language. For example:
+   > Si un produit ne marche pas, la cause n°1 est que les HTTP Requests ne sont pas activées dans les
+   > paramètres du jeu, et que ça n'a pas été testé en dehors de Studio.
+4. That's it. The next ticket opened in that category will be greeted by "L'IA Signature" / "Signature AI"
+   instead of immediately pinging staff.
+
+**How it behaves:**
+- It already knows what the user answered in the intake questions — no need to repeat itself.
+- It asks focused follow-up questions and offers solutions based on what you taught it.
+- If it can't help (the knowledge doesn't cover it, the user asks for a human, the topic is sensitive, or
+  too many exchanges pass without progress — configurable in **Paramètres → Échanges max avant escalade**),
+  it says so and staff get pinged for the first time at that point.
+- If a staff member types a normal message in the ticket channel at any point, that's treated as taking
+  over — the AI stops immediately and stays off for the rest of that ticket.
+- Every AI message is clearly logged (🤖) in the transcript, right alongside user/staff messages, so nothing
+  is hidden from the record.
+- Model and escalation threshold are adjustable in the dashboard (**Catégories** tab, near the top); the
+  default model is `gemini-2.5-flash`, well within Gemini's free tier for a support bot's volume.
+
+**Limits worth knowing:** the free Gemini tier has a daily request cap that resets every 24h (currently
+generous — see [ai.google.dev/pricing](https://ai.google.dev/pricing) for the exact current numbers, they
+do change). If it's ever exceeded, or the API has a hiccup, the bot fails safe: it pings staff normally
+instead of leaving the user stuck. A ticket the AI fully resolves (user never replies again) won't
+auto-close on its own the way staff-handled tickets do — just close it manually when you notice it's done.
+
+## 7. Managing everything from the dashboard
 
 Open `/dashboard`, log in, and use the six tabs:
 
@@ -205,7 +247,7 @@ Open `/dashboard`, log in, and use the six tabs:
 Click **+ Nouvelle catégorie** to add something like "Custom Services" from scratch — it appears in the
 Discord menu immediately (until the disk resets, see above).
 
-## 7. Slash commands
+## 8. Slash commands
 
 - `/close` — closes the current ticket channel (must be run inside a ticket channel).
 - `/ping` — quick check that the bot is online.
@@ -219,7 +261,7 @@ posted back into the same channel). **Remind now** immediately sends the inactiv
 waiting for the 24h timer) and starts the 1h auto-close countdown. **Ban user** asks for confirmation, then
 bans the user from opening future tickets and closes this one.
 
-## 8. Notes on behavior
+## 9. Notes on behavior
 
 - Only DMs to the bot start the flow; messages in the server are ignored unless they're inside an active
   ticket channel (then they're relayed to the user).

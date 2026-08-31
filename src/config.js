@@ -55,6 +55,10 @@ function defaultConfig() {
       logChannelId: '',
       pingRoleId: '',
       anonymousReplies: false,
+      ai: {
+        model: 'gemini-2.5-flash',
+        maxTurns: 6,
+      },
       presence: {
         type: 'WATCHING', // PLAYING | LISTENING | WATCHING | COMPETING | STREAMING
         text: 'for new tickets',
@@ -199,9 +203,10 @@ function migrate(cfg) {
   cfg.settings.texts = { ...DEFAULT_TEXTS, ...(cfg.settings.texts || {}) };
   cfg.settings.pingRoleId = cfg.settings.pingRoleId || '';
   cfg.settings.anonymousReplies = cfg.settings.anonymousReplies || false;
+  cfg.settings.ai = { model: 'gemini-2.5-flash', maxTurns: 6, ...(cfg.settings.ai || {}) };
   cfg.settings.logChannelId = cfg.settings.logChannelId || '';
   cfg.settings.presence = { type: 'WATCHING', text: 'for new tickets', url: '', status: 'online', ...(cfg.settings.presence || {}) };
-  cfg.categories = cfg.categories || [];
+  cfg.categories = (cfg.categories || []).map((c) => ({ aiEnabled: false, aiKnowledge: '', ...c }));
   return cfg;
 }
 

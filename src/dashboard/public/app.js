@@ -189,6 +189,8 @@
     node.querySelector('.label-en-input').value = category.label_en || '';
     node.querySelector('.label-fr-input').value = category.label_fr || '';
     node.querySelector('.id-badge').textContent = category.id;
+    node.querySelector('.ai-enabled-input').checked = !!category.aiEnabled;
+    node.querySelector('.ai-knowledge-input').value = category.aiKnowledge || '';
 
     buildRolesPicker(node.querySelector('.roles-picker'), category.roleIds || []);
 
@@ -214,6 +216,8 @@
       label_en: node.querySelector('.label-en-input').value,
       label_fr: node.querySelector('.label-fr-input').value,
       roleIds,
+      aiEnabled: node.querySelector('.ai-enabled-input').checked,
+      aiKnowledge: node.querySelector('.ai-knowledge-input').value,
       questions: collectQuestionsPayload(node),
     };
     await api(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -300,7 +304,7 @@
 
   // ---- Reviews / transcripts tab ----
   let reviewsLoaded = false;
-  const TRANSCRIPT_ICONS = { user: '👤', staff: '🛠️', note: '📝', system: 'ℹ️' };
+  const TRANSCRIPT_ICONS = { user: '👤', staff: '🛠️', note: '📝', system: 'ℹ️', ai: '🤖' };
 
   function renderTranscriptBox(transcript, ratingComment) {
     const box = document.createElement('div');
@@ -546,6 +550,26 @@
         }),
       });
       flashSaved(document.getElementById('presenceSaved'));
+    });
+
+    api('/api/ai-status').then((status) => {
+      const hint = document.getElementById('aiStatusHint');
+      if (status.enabled) {
+        hint.textContent = "✅ Clé Gemini détectée — L'IA Signature peut être activée par catégorie ci-dessous.";
+      } else {
+        hint.textContent = "⚠️ Aucune clé GEMINI_API_KEY configurée sur le serveur — active l'IA sur une catégorie ne fera rien tant que la variable d'environnement n'est pas ajoutée sur Render (voir le README).";
+        hint.classList.add('warning');
+      }
+    });
+    const aiSettings = config.settings.ai || {};
+    document.getElementById('aiModel').value = aiSettings.model || 'gemini-2.5-flash';
+    document.getElementById('aiMaxTurns').value = aiSettings.maxTurns || 6;
+    document.getElementById('saveAiSettings').addEventListener('click', async () => {
+      await api('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ ai: { model: document.getElementById('aiModel').value, maxTurns: document.getElementById('aiMaxTurns').value } }),
+      });
+      flashSaved(document.getElementById('aiSettingsSaved'));
     });
 
     api('/api/backup-status').then((status) => {

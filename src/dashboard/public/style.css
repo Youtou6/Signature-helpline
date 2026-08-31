@@ -245,6 +245,28 @@ button.danger:hover { background: var(--danger-dim); color: var(--ink); }
 
 .category-card-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
 
+.ai-field {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gold-dim);
+  border-radius: 3px;
+  padding: 12px 14px;
+  background: var(--panel);
+}
+.ai-knowledge-input {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 90px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 9px 11px;
+  border-radius: 3px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  resize: vertical;
+}
+.hint.warning { color: var(--danger); }
+
 @media (max-width: 700px) {
   .category-card-head { grid-template-columns: 1fr 1fr; }
   .id-badge { grid-column: span 2; }
@@ -353,6 +375,7 @@ button.danger:hover { background: var(--danger-dim); color: var(--ink); }
 .transcript-entry.note .who { color: var(--danger); }
 .transcript-entry.system .who { color: var(--ink-dim); }
 .transcript-entry.system { font-style: italic; color: var(--ink-dim); }
+.transcript-entry.ai .who { color: var(--gold); }
 .transcript-attachments { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
 .transcript-attachments a { color: var(--gold); font-size: 12px; text-decoration: none; }
 .transcript-attachments a:hover { text-decoration: underline; }
