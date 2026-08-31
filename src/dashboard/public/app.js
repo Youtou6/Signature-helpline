@@ -562,7 +562,7 @@
       }
     });
     const aiSettings = config.settings.ai || {};
-    document.getElementById('aiModel').value = aiSettings.model || 'gemini-2.5-flash';
+    document.getElementById('aiModel').value = aiSettings.model || 'gemini-3.6-flash';
     document.getElementById('aiMaxTurns').value = aiSettings.maxTurns || 6;
     document.getElementById('saveAiSettings').addEventListener('click', async () => {
       await api('/api/settings', {

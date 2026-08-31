@@ -88,7 +88,7 @@ module.exports = function dashboardRouter(client) {
     cfg.settings.anonymousReplies = req.body.anonymousReplies ?? cfg.settings.anonymousReplies;
     if (req.body.ai) {
       cfg.settings.ai = {
-        model: req.body.ai.model || cfg.settings.ai.model || 'gemini-2.5-flash',
+        model: req.body.ai.model || cfg.settings.ai.model || 'gemini-3.6-flash',
         maxTurns: Number(req.body.ai.maxTurns) || 6,
       };
     }

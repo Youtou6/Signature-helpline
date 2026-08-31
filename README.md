@@ -203,21 +203,35 @@ goes straight to staff.
 **How it behaves:**
 - It already knows what the user answered in the intake questions — no need to repeat itself.
 - It asks focused follow-up questions and offers solutions based on what you taught it.
-- If it can't help (the knowledge doesn't cover it, the user asks for a human, the topic is sensitive, or
-  too many exchanges pass without progress — configurable in **Paramètres → Échanges max avant escalade**),
-  it says so and staff get pinged for the first time at that point.
-- If a staff member types a normal message in the ticket channel at any point, that's treated as taking
-  over — the AI stops immediately and stays off for the rest of that ticket.
+- **Roblox Studio research**: if the question is specifically about Roblox Studio / development and neither
+  its own knowledge nor what you taught it covers it, it searches the web (via Google Search grounding),
+  prioritizing the Roblox Developer Forum and official Roblox docs, before answering — rather than guessing.
+- **Always offers a human**: if the user asks to talk to a person at any point, the AI tells them that's no
+  problem, pings the category's staff roles, and immediately hands the ticket off — it never keeps someone
+  stuck. The same happens automatically if it's out of its depth, the topic is sensitive, the user is being
+  abusive/trolling, or too many exchanges pass without progress (configurable — see "Échanges max avant
+  escalade" in the dashboard).
+- **Pings on resolution too**: if the AI believes it fully solved the issue, it stays available for
+  follow-ups but also pings the category's staff roles with a "✅ resolved" note, so the team has
+  visibility even when they were never actively needed.
+- **Full staff visibility**: everything the user types is posted in the ticket channel in real time —
+  exactly like a normal ticket — so staff can watch the AI's conversation live, not just see it after the
+  fact in the transcript.
+- **Manual takeover, either direction**: a staff member typing a normal message in the channel instantly
+  and silently switches the ticket back to human mode. Conversely, a **"🤖 Call L'IA Signature"** button
+  appears on tickets in AI-enabled categories, letting staff bring the AI in (or back in) whenever they want.
 - Every AI message is clearly logged (🤖) in the transcript, right alongside user/staff messages, so nothing
   is hidden from the record.
 - Model and escalation threshold are adjustable in the dashboard (**Catégories** tab, near the top); the
-  default model is `gemini-2.5-flash`, well within Gemini's free tier for a support bot's volume.
+  default model is `gemini-3.6-flash`, well within Gemini's free tier for a support bot's volume.
 
 **Limits worth knowing:** the free Gemini tier has a daily request cap that resets every 24h (currently
 generous — see [ai.google.dev/pricing](https://ai.google.dev/pricing) for the exact current numbers, they
-do change). If it's ever exceeded, or the API has a hiccup, the bot fails safe: it pings staff normally
-instead of leaving the user stuck. A ticket the AI fully resolves (user never replies again) won't
-auto-close on its own the way staff-handled tickets do — just close it manually when you notice it's done.
+do change). Web search uses a couple of extra requests per lookup, so it draws down the quota a bit faster
+than a plain reply. If the quota is ever exceeded, or the API has a hiccup, the bot fails safe: it pings
+staff normally instead of leaving the user stuck. A ticket the AI fully resolves (user never replies again)
+won't auto-close on its own the way staff-handled tickets do — just close it manually when you notice it's
+done.
 
 ## 7. Managing everything from the dashboard
 

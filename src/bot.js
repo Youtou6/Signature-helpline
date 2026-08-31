@@ -268,14 +268,15 @@ function buildTicketContainer(cfg, user, category, lang, answers, claimedBy) {
   }
 
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  for (const row of buildTicketActionRows(user.id, !!claimedBy)) container.addActionRowComponents(row);
+  for (const row of buildTicketActionRows(user.id, !!claimedBy, category)) container.addActionRowComponents(row);
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${cfg.settings.teamName}`));
 
   return container;
 }
 
-// Two rows: primary actions, then secondary/staff-tool actions.
-function buildTicketActionRows(userId, claimed) {
+// Two or three rows: primary actions, secondary/staff-tool actions, and (only when
+// this category has the AI enabled) a way to call it in manually.
+function buildTicketActionRows(userId, claimed, category) {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`modmail:close:${userId}`).setLabel('Close ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`modmail:redirect:${userId}`).setLabel('Redirect').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
@@ -289,7 +290,15 @@ function buildTicketActionRows(userId, claimed) {
     new ButtonBuilder().setCustomId(`modmail:remind:${userId}`).setLabel('Remind now').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`modmail:ban:${userId}`).setLabel('Ban user').setEmoji('🚫').setStyle(ButtonStyle.Danger),
   );
-  return [row1, row2];
+  const rows = [row1, row2];
+  if (category && category.aiEnabled && ai.isEnabled()) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`modmail:callai:${userId}`).setLabel("Call L'IA Signature").setEmoji('🤖').setStyle(ButtonStyle.Primary),
+      ),
+    );
+  }
+  return rows;
 }
 
 async function refreshTicketMessage(client, guild, userId, ticket) {
@@ -335,27 +344,56 @@ async function pingStaffForEscalation(client, guild, channel, category) {
   }
 }
 
+async function pingStaffForResolution(client, guild, channel, category) {
+  const cfg = getConfig();
+  const pingParts = [...(category.roleIds || [])];
+  if (cfg.settings.pingRoleId && !pingParts.includes(cfg.settings.pingRoleId)) pingParts.push(cfg.settings.pingRoleId);
+  if (pingParts.length) {
+    await channel.send(`${pingParts.map((r) => `<@&${r}>`).join(' ')} — ✅ the AI believes this is resolved.`).catch(() => {});
+  }
+}
+
+// Applies the outcome of an ai.converse() call: sends the reply, logs it, updates
+// ticket state, and pings staff on escalation or resolution. Shared by kickoff and
+// every subsequent turn so the two paths can never drift out of sync.
+async function applyAiResult(client, guild, channel, user, ticket, category, result, history, turnsBefore) {
+  const tag = aiTagFor(ticket.language);
+  await user.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
+  await channel.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
+  store.appendTranscript(user.id, { from: 'ai', authorTag: "L'IA Signature", content: result.message });
+
+  const cfg = getConfig();
+  const maxTurns = (cfg.settings.ai && cfg.settings.ai.maxTurns) || 6;
+  const nextTurns = turnsBefore + 1;
+  const shouldEscalate = result.escalate || (!result.resolved && nextTurns >= maxTurns);
+
+  store.updateTicket(user.id, {
+    aiActive: !shouldEscalate,
+    aiHistory: [...history, { role: 'model', parts: [{ text: result.message }] }],
+    aiTurns: nextTurns,
+  });
+
+  if (shouldEscalate) {
+    store.appendTranscript(user.id, { from: 'system', authorTag: 'System', content: 'Escalated from AI to staff.' });
+    await pingStaffForEscalation(client, guild, channel, category);
+  } else if (result.resolved) {
+    store.appendTranscript(user.id, { from: 'system', authorTag: 'System', content: 'AI marked the issue as resolved.' });
+    await pingStaffForResolution(client, guild, channel, category);
+  }
+}
+
 // Runs once, right after the channel is created, when the category has AI enabled.
 // Returns true if the AI actually greeted the user (false = caller should fall back to a normal staff ping).
 async function aiKickoff(client, guild, channel, user, category, ticket) {
   const cfg = getConfig();
   const result = await ai.converse(cfg, category, ticket, [], true);
   if (!result) return false;
-
-  const tag = aiTagFor(ticket.language);
-  await user.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
-  await channel.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
-  store.appendTranscript(user.id, { from: 'ai', authorTag: "L'IA Signature", content: result.message });
-  store.updateTicket(user.id, {
-    aiActive: !result.escalate,
-    aiHistory: [{ role: 'model', parts: [{ text: result.message }] }],
-    aiTurns: 1,
-  });
-  if (result.escalate) await pingStaffForEscalation(client, guild, channel, category);
+  await applyAiResult(client, guild, channel, user, ticket, category, result, [], 0);
   return true;
 }
 
-// Runs on every subsequent DM from the user while the AI is handling their ticket.
+// Runs on every subsequent DM from the user while the AI is handling their ticket,
+// and also when staff manually re-invoke the AI on a ticket (see "Call AI" button).
 // Returns true if the AI handled the message (false = caller should fall back to a normal relay).
 async function handleAiUserMessage(client, guild, channel, user, ticket, text) {
   const category = getCategory(ticket.categoryId);
@@ -371,25 +409,7 @@ async function handleAiUserMessage(client, guild, channel, user, ticket, text) {
     return false;
   }
 
-  const tag = aiTagFor(ticket.language);
-  await user.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
-  await channel.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
-  store.appendTranscript(user.id, { from: 'ai', authorTag: "L'IA Signature", content: result.message });
-
-  const maxTurns = (cfg.settings.ai && cfg.settings.ai.maxTurns) || 6;
-  const nextTurns = (ticket.aiTurns || 0) + 1;
-  const shouldEscalate = result.escalate || nextTurns >= maxTurns;
-
-  store.updateTicket(user.id, {
-    aiActive: !shouldEscalate,
-    aiHistory: [...history, { role: 'model', parts: [{ text: result.message }] }],
-    aiTurns: nextTurns,
-  });
-
-  if (shouldEscalate) {
-    store.appendTranscript(user.id, { from: 'system', authorTag: 'System', content: 'Escalated from AI to staff.' });
-    await pingStaffForEscalation(client, guild, channel, category);
-  }
+  await applyAiResult(client, guild, channel, user, ticket, category, result, history, ticket.aiTurns || 0);
   return true;
 }
 
@@ -586,15 +606,13 @@ async function handleDM(client, message) {
     store.appendTranscript(userId, { from: 'user', authorTag: message.author.tag, content: message.content, attachments: files.map((f) => f.attachment) });
     store.updateTicket(userId, { lastActivityAt: Date.now(), warningSentAt: null });
 
+    // Staff always see what the user wrote, whether or not the AI is currently handling the ticket.
+    await channel.send(relayPayload(message.author.tag, message.author.displayAvatarURL(), message.content, files)).catch(() => {});
+
     if (ticket.aiActive && !files.length) {
-      const handled = await handleAiUserMessage(client, guild, channel, message.author, ticket, message.content);
-      if (handled) {
-        await message.react('✅').catch(() => {});
-        return;
-      }
+      await handleAiUserMessage(client, guild, channel, message.author, ticket, message.content);
     }
 
-    await channel.send(relayPayload(message.author.tag, message.author.displayAvatarURL(), message.content, files)).catch(() => {});
     await message.react('✅').catch(() => {});
     return;
   }
@@ -1042,6 +1060,44 @@ function createBotClient() {
         await sendInactivityWarning(interaction.client, userId, ticket);
         await interaction.reply({ content: '⏳ Reminder sent to the user — auto-close in ~1h if they stay silent.', ephemeral: true });
         if (interaction.guild) await logEvent(interaction.guild, interaction.client, `⏳ **Manual reminder** sent by ${interaction.user.tag} — <#${ticket.channelId}>`);
+        return;
+      }
+
+      // --- Manually call the AI into a ticket (category must have it enabled) ---
+      if (interaction.isButton() && interaction.customId.startsWith('modmail:callai:')) {
+        const userId = interaction.customId.split(':')[2];
+        const ticket = store.getTicketByUser(userId);
+        if (!ticket) {
+          await interaction.reply({ content: 'This ticket is no longer open.', ephemeral: true });
+          return;
+        }
+        const category = getCategory(ticket.categoryId);
+        if (!category || !category.aiEnabled || !ai.isEnabled()) {
+          await interaction.reply({ content: "L'IA is not available for this category.", ephemeral: true });
+          return;
+        }
+        const user = await interaction.client.users.fetch(userId).catch(() => null);
+        const channel = interaction.guild?.channels.cache.get(ticket.channelId);
+        if (!user || !channel) {
+          await interaction.reply({ content: 'Something went wrong, please try again.', ephemeral: true });
+          return;
+        }
+        await interaction.reply({ content: "🤖 Calling L'IA Signature into this ticket...", ephemeral: true });
+        store.updateTicket(userId, { aiActive: true });
+        const freshTicket = store.getTicketByUser(userId);
+        if (freshTicket.aiHistory && freshTicket.aiHistory.length) {
+          await handleAiUserMessage(
+            interaction.client,
+            interaction.guild,
+            channel,
+            user,
+            freshTicket,
+            '(Staff just re-enabled you on this ticket. Briefly check in with the user and continue helping - do not repeat your introduction.)',
+          );
+        } else {
+          await aiKickoff(interaction.client, interaction.guild, channel, user, category, freshTicket);
+        }
+        if (interaction.guild) await logEvent(interaction.guild, interaction.client, `🤖 **AI called in manually** by ${interaction.user.tag} — <#${ticket.channelId}>`);
         return;
       }
 
