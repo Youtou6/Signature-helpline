@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const persistence = require('./persistence');
+const upstash = require('./upstash');
 
 const CONFIG_PATH = path.join(__dirname, '..', 'data', 'config.json');
+const UPSTASH_KEY = 'signature:config';
 const MAX_QUESTIONS_PER_CATEGORY = 10;
 const MAX_FIELDS_PER_MODAL = 5;
 
@@ -220,7 +222,24 @@ function saveConfig(cfg) {
   const content = JSON.stringify(cfg, null, 2);
   fs.writeFileSync(CONFIG_PATH, content);
   persistence.scheduleSync(() => content);
+  upstash.push(UPSTASH_KEY, content).catch(() => {});
   return cfg;
+}
+
+// Called once at startup, before anything else reads config.json: pulls the
+// last-saved config from Upstash (if configured) so it survives a redeploy.
+async function hydrateConfig() {
+  if (!upstash.isEnabled()) return;
+  const remote = await upstash.pull(UPSTASH_KEY);
+  if (!remote) return;
+  try {
+    JSON.parse(remote); // validate before trusting it
+    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, remote);
+    console.log('Signature Modmail — config restored from Upstash.');
+  } catch (err) {
+    console.error('Upstash config data was invalid JSON, ignoring:', err.message);
+  }
 }
 
 function getCategory(id) {
@@ -242,6 +261,7 @@ function slugify(text) {
 module.exports = {
   getConfig,
   saveConfig,
+  hydrateConfig,
   defaultConfig,
   getCategory,
   slugify,

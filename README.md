@@ -16,6 +16,9 @@ A custom Discord modmail bot for the **Signature** server.
   channel's topic secretly encodes the user/category/language — so if the bot restarts and its on-disk
   memory is gone (e.g. a fresh Render deploy), it rebuilds its list of open tickets straight from the
   existing Discord channels, including a best-effort replay of the conversation.
+- **Settings and reviews always saved**: with a free Upstash Redis database connected (see "Persisting
+  everything with Upstash" below), every category, text, setting, rating, and ban is instantly backed up
+  and automatically restored on startup — a redeploy never resets them.
 - **Bot status**: set what the bot is shown as doing ("Watching for new tickets", "Listening to...", a
   Twitch stream, etc.) and its online/idle/dnd status, right from the dashboard.
 - **Staff tools on every ticket**: besides Close/Redirect/Claim, staff get **Remind now** (send the
@@ -75,6 +78,8 @@ src/
   archive.js          Reads/writes data/archive.json (closed tickets: full transcript + rating)
   bans.js             Reads/writes data/bans.json (banned user IDs)
   ai.js               "L'IA Signature" - optional Gemini-powered first-line assistant
+  persistence.js      Optional GitHub auto-commit of config.json
+  upstash.js          Optional Upstash Redis sync (config/archive/bans survive redeploys)
   i18n.js             Reads the dashboard-editable EN/FR texts, with built-in fallbacks
   deploy-commands.js  One-off script to register the /close and /ping slash commands
   dashboard/
@@ -148,40 +153,40 @@ Use a free uptime pinger such as [UptimeRobot](https://uptimerobot.com) to hit y
 5 minutes — that keeps it alive at no cost. If you'd rather not depend on that, Render's paid Starter plan
 ($7/mo) doesn't sleep.
 
-### About data persistence
+### Persisting everything with Upstash (recommended)
 
-`data/config.json`, `data/tickets.json` and `data/archive.json` live on Render's local disk, which is
-**wiped on every new deploy** (and on free-plan sleep/wake cycles). `tickets.json` is fine to lose — the
-bot rebuilds open tickets straight from Discord on startup (see "Survives restarts" above). But your
-**categories, edited texts, settings, and the ratings/transcripts archive will reset** on redeploy unless
-you use one of these:
+`data/config.json`, `data/archive.json`, and `data/bans.json` live on Render's local disk, which is
+**wiped on every new deploy** (and on free-plan sleep/wake cycles). Without any extra setup, that means
+your categories, texts, settings, ratings/transcripts, and ban list would all reset on every redeploy.
 
-**Option 1 — manual backup (works out of the box, no setup).** In the dashboard's Paramètres tab:
-- **📥 Exporter la config** downloads the current categories/texts/settings as a JSON file.
-- **📤 Importer une config** uploads one back and replaces the current configuration.
+**Upstash Redis fixes this automatically, for free, forever — no card required.** Every save (a category
+edit, a new rating, a ban) is instantly mirrored to Redis; on startup, before anything else runs, the bot
+pulls the latest saved version back down. You never have to think about it again.
 
-Export before you `git push`, import right after the new deploy finishes. Takes 10 seconds, zero extra
-accounts. (Only backs up categories/texts/settings, not the ratings archive.)
+1. Go to [console.upstash.com](https://console.upstash.com), sign up (GitHub/Google login works), and
+   click **Create Database**. Any region close to your Render region is fine. The free plan (500,000
+   commands/month, 256 MB) is far more than this bot will ever use.
+2. On the database's page, find the **REST API** section and copy the `UPSTASH_REDIS_REST_URL` and
+   `UPSTASH_REDIS_REST_TOKEN` values.
+3. On Render, add both as environment variables with those exact names. Redeploy.
+4. That's it — no code change needed. Look for `Upstash persistence enabled — restoring saved data...` in
+   the Render logs on the next boot to confirm it's working.
 
-**Option 2 — automatic GitHub sync (optional, a few minutes to set up).** If you'd rather this happen on
-its own: every dashboard save can be auto-committed straight back to `data/config.json` in your GitHub
-repo, so the *next* deploy already starts from your latest edits.
-1. GitHub → your avatar → **Settings** → **Developer settings** → **Personal access tokens** →
-   **Fine-grained tokens** → generate one scoped to just this repo, with **Contents: Read and write**
-   permission.
-2. On Render, add two environment variables: `GITHUB_TOKEN` (the token) and `GITHUB_REPO`
-   (`your-username/your-repo-name`). Optionally `GITHUB_BRANCH` if you don't use `main`.
-3. That's it — no code change needed, this is already wired up and simply does nothing if those variables
-   aren't set.
+`data/tickets.json` (currently open tickets) is deliberately *not* synced this way — it changes on every
+single message, and open tickets already have a more reliable recovery path: the bot rebuilds them straight
+from the actual Discord channels on startup (see "Survives restarts" above), which is the real source of
+truth anyway.
 
-⚠️ If Render's "Auto-Deploy" is on, every commit the bot makes will also trigger a redeploy (a few seconds
-of downtime each time someone saves in the dashboard). If that's annoying, turn Auto-Deploy off on Render
-and use the **Manual Deploy** button whenever you actually push new code — your data stays current in
-GitHub either way.
-
-For the ratings/transcripts archive itself, there's no export yet; if you need that to survive deploys too,
-upgrading to a Render paid plan with a **Persistent Disk**, or swapping the `data/*.json` files for a small
-database (e.g. free MongoDB Atlas), are the two real options — happy to wire either up if you want it.
+**Without Upstash configured**, two fallbacks remain available (categories/texts/settings only, not the
+ratings archive or bans):
+- **Manual backup** — in the dashboard's Paramètres tab, **📥 Exporter la config** downloads a JSON
+  snapshot, **📤 Importer une config** restores one. Export before `git push`, import after the deploy.
+- **GitHub auto-sync** — every dashboard save can be auto-committed to `data/config.json` in your repo, so
+  the *next* deploy starts from your latest edits. Add `GITHUB_TOKEN` (a fine-grained personal access token
+  with **Contents: Read and write** on this repo) and `GITHUB_REPO` (`your-username/your-repo-name`) as
+  environment variables. ⚠️ If Render's "Auto-Deploy" is on, every commit this creates also triggers a
+  redeploy — turn Auto-Deploy off and use **Manual Deploy** if that's disruptive. This is independent of
+  Upstash; both can run at once if you want your config versioned in git *and* instantly restored.
 
 ## 6. Enabling L'IA Signature (Gemini)
 

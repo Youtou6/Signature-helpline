@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const upstash = require('./upstash');
 
 const ARCHIVE_PATH = path.join(__dirname, '..', 'data', 'archive.json');
+const UPSTASH_KEY = 'signature:archive';
 const MAX_ENTRIES = 500; // keep the archive file from growing unbounded on a JSON-file setup
 
 function ensure() {
@@ -17,7 +19,26 @@ function readAll() {
 }
 
 function writeAll(list) {
-  fs.writeFileSync(ARCHIVE_PATH, JSON.stringify(list, null, 2));
+  const content = JSON.stringify(list, null, 2);
+  fs.writeFileSync(ARCHIVE_PATH, content);
+  upstash.push(UPSTASH_KEY, content).catch(() => {});
+}
+
+// Called once at startup, before anything else reads archive.json: pulls the
+// last-saved archive from Upstash (if configured) so reviews/transcripts survive a redeploy.
+async function hydrateArchive() {
+  if (!upstash.isEnabled()) return;
+  const remote = await upstash.pull(UPSTASH_KEY);
+  if (!remote) return;
+  try {
+    const parsed = JSON.parse(remote);
+    if (!Array.isArray(parsed)) throw new Error('not an array');
+    fs.mkdirSync(path.dirname(ARCHIVE_PATH), { recursive: true });
+    fs.writeFileSync(ARCHIVE_PATH, remote);
+    console.log('Signature Modmail — archive/reviews restored from Upstash.');
+  } catch (err) {
+    console.error('Upstash archive data was invalid, ignoring:', err.message);
+  }
 }
 
 function addEntry(entry) {
@@ -105,4 +126,4 @@ function buildTranscriptText(entry) {
   return lines.join('\n');
 }
 
-module.exports = { addEntry, getById, setRating, deleteEntry, appendTranscriptEntry, listSummaries, getStats, buildTranscriptText, readAll };
+module.exports = { addEntry, getById, setRating, deleteEntry, appendTranscriptEntry, listSummaries, getStats, buildTranscriptText, hydrateArchive, readAll };

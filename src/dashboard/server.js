@@ -6,6 +6,7 @@ const store = require('../store');
 const bans = require('../bans');
 const ai = require('../ai');
 const persistence = require('../persistence');
+const upstash = require('../upstash');
 const { applyPresence } = require('../bot');
 
 function requireAuth(req, res, next) {
@@ -196,7 +197,7 @@ module.exports = function dashboardRouter(client) {
   // ---- Backup: manual export/import + optional GitHub auto-sync status ----
 
   router.get('/api/backup-status', requireAuth, (req, res) => {
-    res.json({ githubSyncEnabled: persistence.isEnabled() });
+    res.json({ githubSyncEnabled: persistence.isEnabled(), upstashEnabled: upstash.isEnabled() });
   });
 
   router.get('/api/ai-status', requireAuth, (req, res) => {

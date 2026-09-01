@@ -294,7 +294,7 @@ function buildTicketActionRows(userId, claimed, category) {
   if (category && category.aiEnabled && ai.isEnabled()) {
     rows.push(
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`modmail:callai:${userId}`).setLabel("Call L'IA Signature").setEmoji('🤖').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`modmail:callai:${userId}`).setLabel("Recall L'IA Signature").setEmoji('🤖').setStyle(ButtonStyle.Primary),
       ),
     );
   }

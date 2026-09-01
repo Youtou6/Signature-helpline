@@ -573,8 +573,10 @@
     });
 
     api('/api/backup-status').then((status) => {
-      if (status.githubSyncEnabled) {
-        document.getElementById('backupHint').textContent = '✅ Synchronisation automatique vers GitHub activée — tes changements sont sauvegardés en continu, même après un redéploiement.';
+      if (status.upstashEnabled) {
+        document.getElementById('backupHint').textContent = '✅ Upstash connecté — paramètres, catégories, textes, avis et bannissements sont sauvegardés en continu et restaurés automatiquement après un redéploiement.';
+      } else if (status.githubSyncEnabled) {
+        document.getElementById('backupHint').textContent = '✅ Synchronisation automatique vers GitHub activée — tes réglages sont sauvegardés en continu, même après un redéploiement. (Les avis ne sont pas couverts — connecte Upstash pour ça aussi, voir le README.)';
       }
     });
     document.getElementById('exportConfigBtn').addEventListener('click', () => {

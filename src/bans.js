@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const upstash = require('./upstash');
 
 const BANS_PATH = path.join(__dirname, '..', 'data', 'bans.json');
+const UPSTASH_KEY = 'signature:bans';
 
 function ensure() {
   if (!fs.existsSync(BANS_PATH)) {
@@ -16,7 +18,9 @@ function readAll() {
 }
 
 function writeAll(list) {
-  fs.writeFileSync(BANS_PATH, JSON.stringify(list, null, 2));
+  const content = JSON.stringify(list, null, 2);
+  fs.writeFileSync(BANS_PATH, content);
+  upstash.push(UPSTASH_KEY, content).catch(() => {});
 }
 
 function isBanned(userId) {
@@ -39,4 +43,21 @@ function removeBan(userId) {
   return removed;
 }
 
-module.exports = { isBanned, addBan, removeBan, listBans: readAll };
+// Called once at startup, before anything else reads bans.json: pulls the
+// last-saved ban list from Upstash (if configured) so it survives a redeploy.
+async function hydrateBans() {
+  if (!upstash.isEnabled()) return;
+  const remote = await upstash.pull(UPSTASH_KEY);
+  if (!remote) return;
+  try {
+    const parsed = JSON.parse(remote);
+    if (!Array.isArray(parsed)) throw new Error('not an array');
+    fs.mkdirSync(path.dirname(BANS_PATH), { recursive: true });
+    fs.writeFileSync(BANS_PATH, remote);
+    console.log('Signature Modmail — ban list restored from Upstash.');
+  } catch (err) {
+    console.error('Upstash bans data was invalid, ignoring:', err.message);
+  }
+}
+
+module.exports = { isBanned, addBan, removeBan, listBans: readAll, hydrateBans };
