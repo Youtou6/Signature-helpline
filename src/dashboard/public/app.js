@@ -191,6 +191,7 @@
     node.querySelector('.id-badge').textContent = category.id;
     node.querySelector('.ai-enabled-input').checked = !!category.aiEnabled;
     node.querySelector('.ai-knowledge-input').value = category.aiKnowledge || '';
+    node.querySelector('.ai-redirect-input').checked = !!category.aiCanRedirect;
 
     buildRolesPicker(node.querySelector('.roles-picker'), category.roleIds || []);
 
@@ -218,6 +219,7 @@
       roleIds,
       aiEnabled: node.querySelector('.ai-enabled-input').checked,
       aiKnowledge: node.querySelector('.ai-knowledge-input').value,
+      aiCanRedirect: node.querySelector('.ai-redirect-input').checked,
       questions: collectQuestionsPayload(node),
     };
     await api(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify(payload) });

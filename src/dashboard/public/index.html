@@ -222,6 +222,11 @@
         </label>
         <span class="hint">Quand un ticket de cette catégorie est créé, l'IA se présente et échange avec l'utilisateur avant que le staff n'intervienne. Elle peut chercher sur le Roblox Developer Forum / la doc officielle si la question porte sur Roblox Studio et qu'elle ne sait pas. Elle laisse toujours la possibilité de parler à un humain (elle ping alors l'équipe et lâche le ticket), et ping aussi l'équipe si elle considère le problème résolu.</span>
         <textarea class="ai-knowledge-input" placeholder="Ce que l'IA doit savoir pour cette catégorie : causes fréquentes, solutions, choses à vérifier en premier...&#10;Ex : Si un produit ne marche pas, la cause n°1 est que les HTTP Requests ne sont pas activées dans les paramètres du jeu, et que ça n'a pas été testé en dehors de Studio."></textarea>
+        <label class="field inline" style="margin-top: 10px;">
+          <input type="checkbox" class="ai-redirect-input" />
+          <span>🔀 Autoriser l'IA à rediriger automatiquement vers la bonne catégorie</span>
+        </label>
+        <span class="hint">Si le ticket a été ouvert dans la mauvaise catégorie (ex : "Autre" alors que c'est en fait un problème technique), l'IA peut le renvoyer elle-même vers la catégorie la plus adaptée en prévenant l'utilisateur — et prend directement le relais là-bas si l'IA y est aussi activée. Nécessite que l'IA soit activée ci-dessus.</span>
       </div>
 
       <div class="field">

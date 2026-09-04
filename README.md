@@ -223,8 +223,14 @@ goes straight to staff.
   exactly like a normal ticket — so staff can watch the AI's conversation live, not just see it after the
   fact in the transcript.
 - **Manual takeover, either direction**: a staff member typing a normal message in the channel instantly
-  and silently switches the ticket back to human mode. Conversely, a **"🤖 Call L'IA Signature"** button
-  appears on tickets in AI-enabled categories, letting staff bring the AI in (or back in) whenever they want.
+  and silently switches the ticket back to human mode. Conversely, a **"🤖 Recall L'IA Signature"** button
+  appears on tickets in AI-enabled categories, letting staff bring the AI back in whenever they want.
+- **Auto-redirect to the right category** (opt-in per category, tick **"🔀 Autoriser l'IA à rediriger
+  automatiquement vers la bonne catégorie"**): if the ticket was opened under the wrong category — e.g. a
+  player used "Other" but it's really a technical issue — the AI can send it straight to the right one
+  itself. It tells the user warmly first, then the ticket is retitled/re-permissioned exactly like a staff
+  redirect (and unclaimed). If the destination category also has AI enabled, the AI picks the conversation
+  right back up there instead of making the user fill out the intake form again.
 - Every AI message is clearly logged (🤖) in the transcript, right alongside user/staff messages, so nothing
   is hidden from the record.
 - Model and escalation threshold are adjustable in the dashboard (**Catégories** tab, near the top); the

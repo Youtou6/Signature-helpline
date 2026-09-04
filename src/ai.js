@@ -35,13 +35,20 @@ function summarizeAnswersForPrompt(category, lang, answers) {
   return lines.join('\n');
 }
 
+function listOtherCategoriesForPrompt(cfg, currentCategoryId) {
+  return cfg.categories
+    .filter((c) => c.id !== currentCategoryId)
+    .map((c) => `- id: "${c.id}" — ${c.label_en}`)
+    .join('\n');
+}
+
 function buildSystemPrompt(cfg, category, ticket) {
   const teamName = cfg.settings.teamName || 'Signature Support';
   const lang = ticket.language === 'fr' ? 'French' : 'English';
   const answers = summarizeAnswersForPrompt(category, ticket.language, ticket.answers);
   const knowledge = (category.aiKnowledge || '').trim();
 
-  return [
+  const lines = [
     `You are "L'IA Signature" (in English: "Signature AI"), the first-line automated assistant for ${teamName}'s support team on Discord.`,
     `Always reply in ${lang}, matching the user's language, regardless of what language this prompt is written in.`,
     `Introduce yourself once, right at the start of the very first message of the conversation, as "L'IA Signature" (French) or "Signature AI" (English) as appropriate. Never re-introduce yourself after that.`,
@@ -63,11 +70,26 @@ function buildSystemPrompt(cfg, category, ticket) {
     `- you've exchanged several messages without real progress.`,
     `Use status "resolved" when you're confident the issue is genuinely fixed — still write a normal closing reply in "message" (e.g. confirming the fix and inviting them to write again if it comes back).`,
     `Use status "search" ONLY when the question is specifically about Roblox Studio / Roblox development, the answer isn't in the knowledge above or your own knowledge, and a quick look at the Roblox Developer Forum or official Roblox documentation would likely help. Leave "message" empty and set "searchQuery" to a focused, English search query. You will then be given research findings and asked to answer again — never invent an answer you're not sure of instead of searching.`,
+  ];
+
+  if (category.aiCanRedirect) {
+    const others = listOtherCategoriesForPrompt(cfg, category.id);
+    lines.push(
+      ``,
+      `This ticket was opened under "${category.label_en}", but if the user's actual issue is clearly a better fit for a different category, you can send it there directly instead of continuing here. Available categories to redirect to:`,
+      others || '(no other categories are configured)',
+      `Use status "redirect" when the category is clearly wrong — not for minor overlaps, only when it plainly belongs elsewhere. Set "targetCategoryId" to the exact id from the list above, and use "message" to let the user know, warmly, that you're sending them to the right place (do not ask a follow-up question in that same message).`,
+    );
+  }
+
+  lines.push(
     `Otherwise use status "continue" for a normal reply that keeps the conversation going.`,
     ``,
     `Respond ONLY with a single JSON object of this exact shape, no markdown fences, nothing else before or after it:`,
-    `{"status": "continue" | "resolved" | "escalate" | "search", "message": "your reply to the user, in their language (empty string if status is search)", "searchQuery": "only set when status is search, else empty string"}`,
-  ].join('\n');
+    `{"status": "continue" | "resolved" | "escalate" | "search"${category.aiCanRedirect ? ' | "redirect"' : ''}, "message": "your reply to the user, in their language (empty string if status is search)", "searchQuery": "only set when status is search, else empty string"${category.aiCanRedirect ? ', "targetCategoryId": "only set when status is redirect, else empty string"' : ''}}`,
+  );
+
+  return lines.join('\n');
 }
 
 async function callModel(cfg, model, contents, systemPrompt) {
@@ -90,13 +112,14 @@ async function callModel(cfg, model, contents, systemPrompt) {
       const cleaned = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/, '');
       const parsed = JSON.parse(cleaned);
       return {
-        status: ['continue', 'resolved', 'escalate', 'search'].includes(parsed.status) ? parsed.status : 'continue',
+        status: ['continue', 'resolved', 'escalate', 'search', 'redirect'].includes(parsed.status) ? parsed.status : 'continue',
         message: String(parsed.message || ''),
         searchQuery: String(parsed.searchQuery || ''),
+        targetCategoryId: String(parsed.targetCategoryId || ''),
       };
     } catch (parseErr) {
       console.error('Gemini response was not valid JSON, escalating as a safety fallback:', parseErr.message, raw);
-      return { status: 'escalate', message: raw.slice(0, 1800), searchQuery: '' };
+      return { status: 'escalate', message: raw.slice(0, 1800), searchQuery: '', targetCategoryId: '' };
     }
   } catch (err) {
     console.error('Gemini request failed:', err.message || err);
@@ -177,6 +200,7 @@ async function converse(cfg, category, ticket, history, isKickoff) {
   return {
     escalate: result.status === 'escalate',
     resolved: result.status === 'resolved',
+    redirectTo: result.status === 'redirect' ? result.targetCategoryId || null : null,
     message: String(result.message || '').slice(0, 1800),
   };
 }

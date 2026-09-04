@@ -136,6 +136,7 @@ module.exports = function dashboardRouter(client) {
       label_fr: req.body.label_fr || 'Nouvelle catégorie',
       roleIds: Array.isArray(req.body.roleIds) ? req.body.roleIds : [],
       aiEnabled: !!req.body.aiEnabled,
+      aiCanRedirect: !!req.body.aiCanRedirect,
       aiKnowledge: (req.body.aiKnowledge || '').slice(0, 6000),
       questions: sanitizeQuestions(req.body.questions).length
         ? sanitizeQuestions(req.body.questions)
@@ -158,6 +159,7 @@ module.exports = function dashboardRouter(client) {
       label_fr: req.body.label_fr ?? existing.label_fr,
       roleIds: Array.isArray(req.body.roleIds) ? req.body.roleIds : existing.roleIds,
       aiEnabled: req.body.aiEnabled !== undefined ? !!req.body.aiEnabled : existing.aiEnabled,
+      aiCanRedirect: req.body.aiCanRedirect !== undefined ? !!req.body.aiCanRedirect : existing.aiCanRedirect,
       aiKnowledge: req.body.aiKnowledge !== undefined ? String(req.body.aiKnowledge).slice(0, 6000) : existing.aiKnowledge,
       questions: Array.isArray(req.body.questions) ? sanitizeQuestions(req.body.questions) : existing.questions,
     };

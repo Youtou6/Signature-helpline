@@ -362,16 +362,27 @@ async function applyAiResult(client, guild, channel, user, ticket, category, res
   await channel.send(relayPayload(tag, client.user.displayAvatarURL(), result.message)).catch(() => {});
   store.appendTranscript(user.id, { from: 'ai', authorTag: "L'IA Signature", content: result.message });
 
+  store.updateTicket(user.id, {
+    aiHistory: [...history, { role: 'model', parts: [{ text: result.message }] }],
+    aiTurns: turnsBefore + 1,
+  });
+
+  if (result.redirectTo) {
+    const targetCategory = getCategory(result.redirectTo);
+    if (targetCategory) {
+      const freshTicket = store.getTicketByUser(user.id);
+      await performRedirect(client, guild, channel, user.id, freshTicket, targetCategory, "🤖 L'IA Signature");
+      return;
+    }
+    // Target category vanished (deleted mid-conversation) - fall through and just keep going normally.
+  }
+
   const cfg = getConfig();
   const maxTurns = (cfg.settings.ai && cfg.settings.ai.maxTurns) || 6;
   const nextTurns = turnsBefore + 1;
   const shouldEscalate = result.escalate || (!result.resolved && nextTurns >= maxTurns);
 
-  store.updateTicket(user.id, {
-    aiActive: !shouldEscalate,
-    aiHistory: [...history, { role: 'model', parts: [{ text: result.message }] }],
-    aiTurns: nextTurns,
-  });
+  store.updateTicket(user.id, { aiActive: !shouldEscalate });
 
   if (shouldEscalate) {
     store.appendTranscript(user.id, { from: 'system', authorTag: 'System', content: 'Escalated from AI to staff.' });
@@ -539,6 +550,45 @@ async function presentPlanFromModalSubmit(interaction, plan, categoryId, lang, r
     return;
   }
   await finalizeTicket(interaction, 'reply', categoryId, lang, plan.answers, redirectChannelId);
+}
+
+// Shared by the staff "Redirect" flow and the AI's own autonomous redirect
+// (when a category has "aiCanRedirect" enabled). Updates permissions/topic,
+// posts the notice, unclaims, refreshes the ticket card, logs it, then either
+// hands off to the AI in the new category (if it has AI enabled) or asks the
+// new category's intake questions like a normal redirect.
+async function performRedirect(client, guild, channel, userId, ticket, newCategory, redirectedByLabel) {
+  const oldCategory = getCategory(ticket.categoryId);
+  const cfg = getConfig();
+
+  await channel.permissionOverwrites.set(buildOverwrites(guild, client, newCategory));
+  await channel.setTopic(buildTicketTopic(userId, newCategory, ticket.language || 'en')).catch(() => {});
+  const notice = fill(t(cfg, ticket.language || 'en', 'redirectNotice'), {
+    from: oldCategory ? oldCategory.label_en : ticket.categoryId,
+    to: newCategory.label_en,
+    staff: redirectedByLabel,
+  });
+  await channel.send(notice).catch(() => {});
+
+  store.appendTranscript(userId, {
+    from: 'system',
+    authorTag: 'System',
+    content: `Redirected from ${oldCategory ? oldCategory.label_en : ticket.categoryId} to ${newCategory.label_en} by ${redirectedByLabel}. Ticket unclaimed.`,
+  });
+  store.updateTicket(userId, { categoryId: newCategory.id, claimedBy: null, claimedByTag: null, aiActive: false });
+
+  const updatedTicket = store.getTicketByUser(userId);
+  await refreshTicketMessage(client, guild, userId, updatedTicket);
+  await logEvent(guild, client, `🔀 **Redirected** by ${redirectedByLabel} — ${oldCategory ? oldCategory.label_en : ticket.categoryId} → **${newCategory.label_en}** — <#${channel.id}>`);
+
+  const user = await client.users.fetch(userId).catch(() => null);
+  if (user && newCategory.aiEnabled && ai.isEnabled()) {
+    // Hand off straight to the AI in the new category instead of the static questionnaire.
+    const freshTicket = store.getTicketByUser(userId);
+    await aiKickoff(client, guild, channel, user, newCategory, freshTicket);
+  } else {
+    await startRedirectQuestionnaire(client, userId, newCategory, ticket.language || 'en', channel.id);
+  }
 }
 
 async function startRedirectQuestionnaire(client, userId, newCategory, lang, channelId) {
@@ -1166,33 +1216,13 @@ function createBotClient() {
           await interaction.update({ content: 'This ticket or category is no longer available.', components: [] });
           return;
         }
-        const oldCategory = getCategory(ticket.categoryId);
-        const cfg = getConfig();
         const channel = interaction.guild.channels.cache.get(ticket.channelId);
-
-        if (channel) {
-          await channel.permissionOverwrites.set(buildOverwrites(interaction.guild, interaction.client, newCategory));
-          await channel.setTopic(buildTicketTopic(userId, newCategory, ticket.language || 'en')).catch(() => {});
-          const notice = fill(t(cfg, ticket.language || 'en', 'redirectNotice'), {
-            from: oldCategory ? oldCategory.label_en : ticket.categoryId,
-            to: newCategory.label_en,
-            staff: `<@${interaction.user.id}>`,
-          });
-          await channel.send(notice).catch(() => {});
+        if (!channel) {
+          await interaction.update({ content: 'This channel no longer exists.', components: [] });
+          return;
         }
 
-        store.appendTranscript(userId, {
-          from: 'system',
-          authorTag: 'System',
-          content: `Redirected from ${oldCategory ? oldCategory.label_en : ticket.categoryId} to ${newCategory.label_en} by ${interaction.user.tag}. Ticket unclaimed.`,
-        });
-        store.updateTicket(userId, { categoryId: newCategoryId, claimedBy: null, claimedByTag: null, aiActive: false });
-
-        const updatedTicket = store.getTicketByUser(userId);
-        await refreshTicketMessage(interaction.client, interaction.guild, userId, updatedTicket);
-        await logEvent(interaction.guild, interaction.client, `🔀 **Redirected** by ${interaction.user.tag} — ${oldCategory ? oldCategory.label_en : ticket.categoryId} → **${newCategory.label_en}** — <#${ticket.channelId}>`);
-
-        await startRedirectQuestionnaire(interaction.client, userId, newCategory, ticket.language || 'en', ticket.channelId);
+        await performRedirect(interaction.client, interaction.guild, channel, userId, ticket, newCategory, `<@${interaction.user.id}>`);
 
         await interaction.update({ content: `✅ Redirected to ${newCategory.label_en}. The ticket has been unclaimed.`, components: [] });
         return;
